@@ -6,7 +6,7 @@ cd "${ROOT}"
 
 # Edit this section to configure KuaiRand training.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-DATA_ROOT="lazy_onerec/KuaiRand/1K/KuaiRand-1K"
+DATA_ROOT="lazy_onerec/KuaiRand-1K"
 SID_ARTIFACT="lazy_onerec/output/kuairand_sid/sid_index.json"
 OUTPUT_DIR="lazy_onerec/output/kuairand_model"
 

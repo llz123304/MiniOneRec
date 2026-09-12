@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--data-root",
-        default="lazy_onerec/KuaiRand/1K/KuaiRand-1K",
+        default="lazy_onerec/KuaiRand-1K",
         help="KuaiRand variant root containing the data/ directory",
     )
     parser.add_argument("--sid-artifact", required=True)

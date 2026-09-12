@@ -68,21 +68,21 @@ def main() -> None:
     parser.add_argument(
         "--catalog",
         default=(
-            "lazy_onerec/KuaiRand/1K/KuaiRand-1K/"
+            "lazy_onerec/KuaiRand-1K/"
             "data/video_features_basic_1k.csv"
         ),
     )
     parser.add_argument(
         "--captions",
-        default="lazy_onerec/KuaiRand/kuairand_video_captions.csv",
+        default="lazy_onerec/KuaiRand-1K/kuairand_video_captions.csv",
     )
     parser.add_argument(
         "--categories",
-        default="lazy_onerec/KuaiRand/kuairand_video_categories.csv",
+        default="lazy_onerec/KuaiRand-1K/kuairand_video_categories.csv",
     )
     parser.add_argument(
         "--output-dir",
-        default="lazy_onerec/KuaiRand/samples",
+        default="lazy_onerec/KuaiRand-1K/samples",
     )
     parser.add_argument("--sample-size", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)

@@ -97,7 +97,7 @@ def build_item_text(
     cover = clean_value((caption_row or {}).get("show_cover_text"))
     if caption:
         parts.append(f"标题：{caption}")
-    if cover and cover != caption:
+    if cover:
         parts.append(f"封面文字：{cover}")
 
     categories = unique_values(
@@ -588,15 +588,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--data-root",
-        default="lazy_onerec/KuaiRand/1K/KuaiRand-1K",
+        default="lazy_onerec/KuaiRand-1K",
     )
     parser.add_argument(
         "--captions",
-        default="lazy_onerec/KuaiRand/kuairand_video_captions.csv",
+        default="lazy_onerec/KuaiRand-1K/kuairand_video_captions.csv",
     )
     parser.add_argument(
         "--categories",
-        default="lazy_onerec/KuaiRand/kuairand_video_categories.csv",
+        default="lazy_onerec/KuaiRand-1K/kuairand_video_categories.csv",
     )
     parser.add_argument(
         "--scope",

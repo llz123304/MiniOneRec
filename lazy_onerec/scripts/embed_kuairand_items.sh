@@ -22,9 +22,9 @@ MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
 # MODEL_NAME="/data/sdb2/llz/hf_models/Qwen3-Embedding-0.6B"
 
 REVISION=""
-DATA_ROOT="lazy_onerec/KuaiRand/1K/KuaiRand-1K"
-CAPTIONS="lazy_onerec/KuaiRand/kuairand_video_captions.csv"
-CATEGORIES="lazy_onerec/KuaiRand/kuairand_video_categories.csv"
+DATA_ROOT="lazy_onerec/KuaiRand-1K"
+CAPTIONS="${DATA_ROOT}/kuairand_video_captions.csv"
+CATEGORIES="${DATA_ROOT}/kuairand_video_categories.csv"
 SCOPE="clicked"  # clicked | catalog
 WORK_DIR=""
 OUTPUT_DIR=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.

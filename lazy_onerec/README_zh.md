@@ -2,154 +2,130 @@
 
 [English](README.md) | [简体中文](README_zh.md)
 
-独立实现以下流程：
+独立完成三步流程：
 
-1. 编码 KuaiRand 物品文本；
-2. 生成三层语义 ID；
-3. 训练自定义 next-SID 推荐模型。
+```text
+KuaiRand 视频文本 -> Item Embedding -> 三层 SID -> next-SID 模型
+```
 
-Python 代码统一放在 `lazy_onerec/src/`，Shell 入口统一放在
+Python 实现在 `lazy_onerec/src/`，所有执行入口和参数配置在
 `lazy_onerec/scripts/`。
 
-所有命令均从 MiniOneRec 根目录执行：
+## 1. 环境
+
+推荐环境：
+
+| 组件 | 版本 |
+| --- | --- |
+| Python | 3.10 |
+| PyTorch | 2.3.1 |
+| CUDA | 12.1 |
+| Transformers | 4.51.3 |
+| Sentence Transformers | 4.1.0 |
+
+在 GPU 服务器上执行：
 
 ```bash
-cd /Users/bytedance/Desktop/llz/sentiment/MiniOneRec
-```
+cd /data/sdb2/llz/code/onerec/MiniOneRec
 
-## 环境
-
-使用较成熟的组合：Python 3.10、`uv` 和 PyTorch 2.3.1。
-
-```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
+source "$HOME/.local/bin/env"
+
 uv venv --python 3.10 .venv
 source .venv/bin/activate
-```
 
-CUDA 12.1 环境安装 PyTorch：
-
-```bash
 uv pip install torch==2.3.1 \
   --index-url https://download.pytorch.org/whl/cu121
-```
-
-CUDA 11.8 将 `cu121` 改为 `cu118`。macOS 或纯 CPU 环境执行：
-
-```bash
-uv pip install torch==2.3.1
-```
-
-安装其余依赖：
-
-```bash
 uv pip install -r lazy_onerec/requirements.txt
 ```
 
 检查环境：
 
 ```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+python -c "import torch; print('torch:', torch.__version__); print('cuda:', torch.version.cuda); print('available:', torch.cuda.is_available()); print('gpu:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
 ```
 
-PyTorch 版本应为：
+预期至少包含：
 
 ```text
-2.3.1
+torch: 2.3.1
+cuda: 12.1
+available: True
 ```
 
-## 数据
+CUDA 11.8 服务器只需将安装地址中的 `cu121` 改为 `cu118`。macOS 或
+CPU 环境使用：
 
-本地数据应位于：
+```bash
+uv pip install torch==2.3.1
+uv pip install -r lazy_onerec/requirements.txt
+```
+
+## 2. 数据
+
+服务器目录必须保持为：
 
 ```text
-lazy_onerec/KuaiRand/
-├── 1K/KuaiRand-1K/data/
-├── kuairand_video_captions.csv
-└── kuairand_video_categories.csv
+/data/sdb2/llz/code/onerec/MiniOneRec/
+└── lazy_onerec/KuaiRand-1K/
+    ├── data/
+    │   ├── video_features_basic_1k.csv
+    │   ├── log_standard_4_08_to_4_21_1k.csv
+    │   ├── log_standard_4_22_to_5_08_1k.csv
+    │   └── log_random_4_22_to_5_08_1k.csv
+    ├── kuairand_video_captions.csv
+    └── kuairand_video_categories.csv
 ```
 
-生成 20 条对齐的数据样本：
+可选：生成 20 条对齐样本。参数在
+`lazy_onerec/scripts/sample_kuairand_metadata.sh` 顶部修改。
 
 ```bash
-python -m lazy_onerec.src.sample_kuairand_metadata \
-  --sample-size 20 \
-  --seed 42
+lazy_onerec/scripts/sample_kuairand_metadata.sh
 ```
 
-## 1. 生成物品 Embedding
+## 3. 生成 Item Embedding
 
-先构建被点击视频的文本缓存：
+编辑 `lazy_onerec/scripts/embed_kuairand_items.sh` 顶部配置。常用参数：
 
 ```bash
-python -m lazy_onerec.src.embed_kuairand_items \
-  --scope clicked \
-  --prepare-only
+MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
+SCOPE="clicked"       # clicked | catalog
+OUTPUT_DIM=""         # 空值为 Qwen 原生 1024 维；可设为 512
+BATCH_SIZE=128
+DEVICE="auto"         # 有 CUDA 时自动使用 GPU
+NORMALIZE=true
 ```
 
-使用 Qwen3 编码：
+执行：
 
 ```bash
-python -m lazy_onerec.src.embed_kuairand_items \
-  --model-name Qwen/Qwen3-Embedding-0.6B \
-  --scope clicked \
-  --output-dim 512 \
-  --batch-size 128 \
-  --device cuda
+lazy_onerec/scripts/embed_kuairand_items.sh
 ```
 
-使用其他模型时只需替换 `--model-name`：
+默认输出：
 
 ```text
-BAAI/bge-m3
-BAAI/bge-large-zh-v1.5
-Alibaba-NLP/gte-Qwen2-1.5B-instruct
-intfloat/multilingual-e5-large-instruct
-moka-ai/m3e-base
+lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/
+├── item_ids.npy
+├── item_embeddings.npy
+├── embedding_config.json
+└── progress.json
 ```
 
-如需编码完整 1K 视频目录：
+脚本支持断点续传。需要重新生成文本和 embedding 时，将
+`REBUILD_TEXTS=true`、`OVERWRITE=true`，运行一次后改回 `false`。
+
+## 4. 生成 SID
+
+编辑 `lazy_onerec/scripts/build_sid.sh`：
 
 ```bash
-python -m lazy_onerec.src.embed_kuairand_items \
-  --model-name Qwen/Qwen3-Embedding-0.6B \
-  --scope catalog \
-  --output-dim 512 \
-  --batch-size 128 \
-  --device cuda
+METHOD="constrained-rq-kmeans"
+CODEBOOK_SIZES=(256 256 256)
 ```
 
-脚本默认自动断点续传。使用 `--overwrite` 重新编码，使用
-`--rebuild-texts` 重新生成文本缓存。
-
-Qwen clicked 模式的默认输出：
-
-```text
-lazy_onerec/output/
-├── kuairand_items/clicked/
-│   ├── item_ids.npy
-│   ├── item_texts.jsonl
-│   └── text_manifest.json
-└── embeddings/qwen-qwen3-embedding-0-6b-clicked/
-    ├── item_ids.npy
-    ├── item_embeddings.npy
-    ├── embedding_config.json
-    └── progress.json
-```
-
-小规模测试：
-
-```bash
-python -m lazy_onerec.src.embed_kuairand_items \
-  --model-name Qwen/Qwen3-Embedding-0.6B \
-  --scope clicked \
-  --limit 100 \
-  --output-dir lazy_onerec/output/embed-smoke
-```
-
-## 2. 生成 SID
-
-支持四种方法：
+`METHOD` 可选：
 
 ```text
 rq-kmeans
@@ -158,70 +134,46 @@ rq-vae
 rq-kmeans-plus
 ```
 
-执行一种方法：
+执行：
 
 ```bash
-lazy_onerec/scripts/build_sid.sh \
-  --method constrained-rq-kmeans \
-  --embeddings lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/item_embeddings.npy \
-  --item-ids lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/item_ids.npy \
-  --codebook-sizes 256 256 256 \
-  --output-dir lazy_onerec/output/kuairand_sid
+lazy_onerec/scripts/build_sid.sh
 ```
 
-使用 RQ-VAE 或 RQ-Kmeans+ 时补充：
+输出：
 
 ```text
---epochs 500 --batch-size 2048 --device cuda
+lazy_onerec/output/kuairand_sid/
+├── sid_index.json
+├── codes.npy
+└── codebooks.npz
 ```
 
-输出文件：
+## 5. 训练
+
+编辑 `lazy_onerec/scripts/train_kuairand.sh` 顶部的数据、模型和训练参数。
+GPU 支持 BF16 时设置：
+
+```bash
+BF16=true
+```
+
+执行：
+
+```bash
+lazy_onerec/scripts/train_kuairand.sh
+```
+
+默认模型输出目录：
 
 ```text
-sid_index.json
-codes.npy
-codebooks.npz
+lazy_onerec/output/kuairand_model/
 ```
 
-转换已有 MiniOneRec SID：
-
-```bash
-lazy_onerec/scripts/convert_minionerec_sid.sh \
-  --input data/Amazon/index/Industrial_and_Scientific.index.json \
-  --codebook-sizes 256 256 256 \
-  --output lazy_onerec/output/converted_sid/sid_index.json
-```
-
-## 3. 训练模型
-
-```bash
-lazy_onerec/scripts/train_kuairand.sh \
-  --data-root lazy_onerec/KuaiRand/1K/KuaiRand-1K \
-  --sid-artifact lazy_onerec/output/kuairand_sid/sid_index.json \
-  --output-dir lazy_onerec/output/kuairand_model \
-  --max-history 128 \
-  --bf16
-```
-
-训练使用标准推荐日志中的点击序列。随机曝光日志保留给无偏评测和后续
-强化学习。
-
-## 检查命令
-
-查看 embedding 参数：
-
-```bash
-python -m lazy_onerec.src.embed_kuairand_items --help
-```
-
-查看 SID 参数：
-
-```bash
-lazy_onerec/scripts/build_sid.sh --help
-```
-
-运行模型冒烟测试：
+## 6. 检查
 
 ```bash
 lazy_onerec/scripts/smoke_test.sh
+lazy_onerec/scripts/embed_kuairand_items.sh --help
+lazy_onerec/scripts/build_sid.sh --help
 ```
