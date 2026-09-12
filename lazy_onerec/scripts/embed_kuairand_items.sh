@@ -6,14 +6,28 @@ cd "${ROOT}"
 
 # Edit this section to configure item embedding.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+# Recommended default: strong Chinese/multilingual quality, 1024-d native
+# embeddings, and Matryoshka truncation support (for example OUTPUT_DIM=512).
 MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
+
+# Other supported choices (uncomment exactly one and comment the default):
+# MODEL_NAME="BAAI/bge-m3"                         # Multilingual, 1024 dimensions.
+# MODEL_NAME="BAAI/bge-large-zh-v1.5"             # Chinese-focused, 1024 dimensions.
+# MODEL_NAME="Alibaba-NLP/gte-Qwen2-1.5B-instruct" # Higher cost and memory usage.
+# MODEL_NAME="intfloat/multilingual-e5-large-instruct" # Multilingual; adds passage prefix.
+# MODEL_NAME="moka-ai/m3e-base"                    # Lightweight Chinese baseline, 768 dimensions.
+#
+# A local Hugging Face model directory is also accepted:
+# MODEL_NAME="/data/sdb2/llz/hf_models/Qwen3-Embedding-0.6B"
+
 REVISION=""
 DATA_ROOT="lazy_onerec/KuaiRand/1K/KuaiRand-1K"
 CAPTIONS="lazy_onerec/KuaiRand/kuairand_video_captions.csv"
 CATEGORIES="lazy_onerec/KuaiRand/kuairand_video_categories.csv"
 SCOPE="clicked"  # clicked | catalog
 WORK_DIR=""
-OUTPUT_DIR="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked"
+OUTPUT_DIR=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
 
 BATCH_SIZE=128
 WRITE_BATCH_SIZE=8192
@@ -36,7 +50,6 @@ args=(
   --captions "${CAPTIONS}"
   --categories "${CATEGORIES}"
   --scope "${SCOPE}"
-  --output-dir "${OUTPUT_DIR}"
   --batch-size "${BATCH_SIZE}"
   --write-batch-size "${WRITE_BATCH_SIZE}"
   --max-length "${MAX_LENGTH}"
@@ -47,6 +60,7 @@ args=(
 
 [[ -n "${REVISION}" ]] && args+=(--revision "${REVISION}")
 [[ -n "${WORK_DIR}" ]] && args+=(--work-dir "${WORK_DIR}")
+[[ -n "${OUTPUT_DIR}" ]] && args+=(--output-dir "${OUTPUT_DIR}")
 [[ -n "${OUTPUT_DIM}" ]] && args+=(--output-dim "${OUTPUT_DIM}")
 [[ -n "${LIMIT}" ]] && args+=(--limit "${LIMIT}")
 
