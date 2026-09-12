@@ -11,6 +11,11 @@ import numpy as np
 from .artifact import SemanticIDArtifact
 from .constrained_rq_kmeans import residual_kmeans
 from .faiss_rq_kmeans import faiss_residual_kmeans
+from .metrics import (
+    evaluate_final_sid_clusters,
+    print_sid_metrics,
+    save_sid_metrics,
+)
 from .neural_rq import (
     build_rqvae_class,
     make_rq_kmeans_plus,
@@ -53,13 +58,28 @@ def _save_outputs(
     metadata: Dict[str, Any],
     require_unique: bool,
 ) -> SemanticIDArtifact:
+    metrics = evaluate_final_sid_clusters(codes, codebook_sizes)
+    if require_unique and metrics["collision_count"]:
+        raise ValueError(
+            f"artifact contains {metrics['collision_count']} collided items"
+        )
+    metadata = dict(metadata)
+    metadata["metrics_file"] = "sid_metrics.json"
+    metadata["sid_metrics_summary"] = {
+        key: metrics[key]
+        for key in (
+            "num_items",
+            "effective_cluster_count",
+            "collision_count",
+            "collision_rate",
+        )
+    }
     artifact = SemanticIDArtifact.from_rows(
         item_ids=item_ids,
-        codes=codes.tolist(),
+        codes=codes,
         codebook_sizes=codebook_sizes,
         metadata=metadata,
     )
-    artifact.validate(require_unique=require_unique)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     artifact.save(output / "sid_index.json")
@@ -71,6 +91,8 @@ def _save_outputs(
             for level, values in enumerate(codebooks)
         },
     )
+    save_sid_metrics(metrics, output / "sid_metrics.json")
+    print_sid_metrics(metrics)
     return artifact
 
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
+from tqdm.auto import tqdm
 
 
 def _torch():
@@ -354,41 +355,69 @@ def train_neural_rq(
     best_loss = float("inf")
     best_collision = float("inf")
 
-    for epoch in range(epochs):
-        model.train()
-        total_loss = 0.0
-        for (batch,) in loader:
-            batch = batch.to(device)
-            optimizer.zero_grad(set_to_none=True)
-            reconstructed, quant_loss, _ = model(batch, use_sinkhorn=True)
-            loss, _ = model.loss(reconstructed, quant_loss, batch)
-            if not torch.isfinite(loss):
-                raise ValueError("non-finite RQ training loss")
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
-            total_loss += float(loss.detach())
-        epoch_loss = total_loss / max(1, len(loader))
-
-        should_eval = (epoch + 1) % eval_every == 0 or epoch + 1 == epochs
-        if should_eval:
-            codes = encode_neural_rq(tensor.numpy(), model, device, batch_size)
-            collision = 1.0 - len(set(map(tuple, codes))) / len(codes)
-            key = (collision, epoch_loss)
-            if key < best_key:
-                best_key = key
-                best_loss = epoch_loss
-                best_collision = collision
-                best_state = copy.deepcopy(model.state_dict())
-            print(
-                f"epoch={epoch + 1} loss={epoch_loss:.6f} "
-                f"collision_rate={collision:.6f}"
+    with tqdm(
+        total=epochs * len(loader),
+        desc="Training neural RQ",
+        unit="batch",
+        dynamic_ncols=True,
+    ) as progress:
+        for epoch in range(epochs):
+            model.train()
+            total_loss = 0.0
+            for (batch,) in loader:
+                batch = batch.to(device)
+                optimizer.zero_grad(set_to_none=True)
+                reconstructed, quant_loss, _ = model(
+                    batch, use_sinkhorn=True
+                )
+                loss, _ = model.loss(reconstructed, quant_loss, batch)
+                if not torch.isfinite(loss):
+                    raise ValueError("non-finite RQ training loss")
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                total_loss += float(loss.detach())
+                progress.update()
+            epoch_loss = total_loss / max(1, len(loader))
+            progress.set_postfix(
+                epoch=epoch + 1,
+                loss=f"{epoch_loss:.6f}",
             )
+
+            should_eval = (
+                (epoch + 1) % eval_every == 0 or epoch + 1 == epochs
+            )
+            if should_eval:
+                codes = encode_neural_rq(
+                    tensor.numpy(),
+                    model,
+                    device,
+                    batch_size,
+                    description=f"Evaluating epoch {epoch + 1}",
+                    leave=False,
+                )
+                collision = 1.0 - len(set(map(tuple, codes))) / len(codes)
+                key = (collision, epoch_loss)
+                if key < best_key:
+                    best_key = key
+                    best_loss = epoch_loss
+                    best_collision = collision
+                    best_state = copy.deepcopy(model.state_dict())
+                progress.write(
+                    f"epoch={epoch + 1} loss={epoch_loss:.6f} "
+                    f"collision_rate={collision:.6f}"
+                )
 
     if best_state is not None:
         model.load_state_dict(best_state)
-    codes = encode_neural_rq(tensor.numpy(), model, device, batch_size)
+    codes = encode_neural_rq(
+        tensor.numpy(),
+        model,
+        device,
+        batch_size,
+        description="Encoding final SIDs",
+    )
     return NeuralTrainResult(
         model=model,
         codes=codes,
@@ -403,6 +432,8 @@ def encode_neural_rq(
     model,
     device: str,
     batch_size: int,
+    description: str = "Encoding SIDs",
+    leave: bool = True,
 ) -> np.ndarray:
     torch = _torch()
     from torch.utils.data import DataLoader, TensorDataset
@@ -417,6 +448,13 @@ def encode_neural_rq(
     model.eval()
     chunks = []
     with torch.no_grad():
-        for (batch,) in loader:
+        for (batch,) in tqdm(
+            loader,
+            total=len(loader),
+            desc=description,
+            unit="batch",
+            leave=leave,
+            dynamic_ncols=True,
+        ):
             chunks.append(model.get_indices(batch.to(device)).cpu().numpy())
     return np.concatenate(chunks, axis=0).astype(np.int32, copy=False)

@@ -7,19 +7,14 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from ..kuairand_schema import (
+    BINARY_EVENT_FIELDS,
+    N_PLAY_RATIO_BUCKETS,
+    N_TAB_EMBEDDINGS,
+    N_TIME_GAP_BUCKETS,
+)
 from .configuration import LazyOneRecConfig
 from .modeling import LazyOneRecForCausalLM
-
-
-BINARY_CONTEXT_FIELDS = (
-    "long_view",
-    "is_like",
-    "is_follow",
-    "is_comment",
-    "is_forward",
-    "is_hate",
-    "is_profile_enter",
-)
 
 
 class KuaiRandContextEmbedding(nn.Module):
@@ -30,9 +25,9 @@ class KuaiRandContextEmbedding(nn.Module):
         num_gid_embeddings: int,
         d_model: int,
         gid_dim: int = 128,
-        n_tabs: int = 15,
-        n_play_ratio_buckets: int = 8,
-        n_time_gap_buckets: int = 8,
+        n_tabs: int = N_TAB_EMBEDDINGS,
+        n_play_ratio_buckets: int = N_PLAY_RATIO_BUCKETS,
+        n_time_gap_buckets: int = N_TIME_GAP_BUCKETS,
     ):
         super().__init__()
         self.gid_embedding = nn.Embedding(
@@ -42,7 +37,7 @@ class KuaiRandContextEmbedding(nn.Module):
         self.binary_embeddings = nn.ModuleDict(
             {
                 field: nn.Embedding(2, d_model)
-                for field in BINARY_CONTEXT_FIELDS
+                for field in BINARY_EVENT_FIELDS
             }
         )
         self.play_ratio_embedding = nn.Embedding(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import List, Sequence, Tuple
 
 import numpy as np
+from tqdm.auto import tqdm
 
 
 def _validate_sizes(codebook_sizes: Sequence[int]) -> int:
@@ -68,14 +69,28 @@ def faiss_residual_kmeans(
     )
     quantizer.train_type = faiss.ResidualQuantizer.Train_default
     quantizer.max_beam_size = int(beam_size)
-    quantizer.train(values)
+    with tqdm(
+        total=3,
+        desc="FAISS RQ-Kmeans",
+        unit="stage",
+        dynamic_ncols=True,
+    ) as progress:
+        progress.set_postfix_str("training codebooks")
+        quantizer.train(values)
+        progress.update()
 
-    packed = quantizer.compute_codes(values)
-    if packed.ndim == 1:
-        n_bytes = (len(codebook_sizes) * nbits + 7) // 8
-        packed = packed.reshape(-1, n_bytes)
-    if nbits == 8:
-        codes = packed[:, : len(codebook_sizes)].astype(np.int32)
-    else:
-        codes = _unpack_codes(packed, nbits, len(codebook_sizes))
-    return codes, _extract_codebooks(quantizer), quantizer
+        progress.set_postfix_str("encoding items")
+        packed = quantizer.compute_codes(values)
+        if packed.ndim == 1:
+            n_bytes = (len(codebook_sizes) * nbits + 7) // 8
+            packed = packed.reshape(-1, n_bytes)
+        if nbits == 8:
+            codes = packed[:, : len(codebook_sizes)].astype(np.int32)
+        else:
+            codes = _unpack_codes(packed, nbits, len(codebook_sizes))
+        progress.update()
+
+        progress.set_postfix_str("extracting codebooks")
+        codebooks = _extract_codebooks(quantizer)
+        progress.update()
+    return codes, codebooks, quantizer

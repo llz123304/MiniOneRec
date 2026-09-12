@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import List, Sequence, Tuple
 
 import numpy as np
+from tqdm.auto import tqdm
 
 
 def balanced_kmeans(
@@ -56,7 +57,15 @@ def residual_kmeans(
     codes = np.empty((values.shape[0], len(codebook_sizes)), dtype=np.int32)
     codebooks: List[np.ndarray] = []
 
-    for level, size in enumerate(codebook_sizes):
+    levels = tqdm(
+        enumerate(codebook_sizes),
+        total=len(codebook_sizes),
+        desc="Constrained RQ-Kmeans",
+        unit="level",
+        dynamic_ncols=True,
+    )
+    for level, size in levels:
+        levels.set_postfix(level=level + 1, clusters=int(size))
         level_seed = int(np.random.RandomState(seed + level).randint(0, 2**31 - 1))
         level_codes, centroids = balanced_kmeans(
             residual,

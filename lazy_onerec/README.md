@@ -56,11 +56,11 @@ available: True
 To select a physical GPU, edit the embedding, SID, or training shell script:
 
 ```bash
-GPU_ID=0
+gpu_id=0
 ```
 
 Use the index reported by `nvidia-smi`. The selected physical GPU is exposed
-inside the process as `cuda:0`, so keep `DEVICE` set to `"auto"` or `"cuda"`.
+inside the process as `cuda:0`, so keep the default `device="cuda"`.
 
 For a CUDA 11.8 server, replace `cu121` with `cu118` in the PyTorch index URL.
 For macOS or CPU-only environments, use:
@@ -69,6 +69,9 @@ For macOS or CPU-only environments, use:
 uv pip install torch==2.3.1
 uv pip install -r lazy_onerec/requirements.txt
 ```
+
+For non-CUDA execution, also set `device="cpu"` or `"mps"` in the relevant
+shell scripts.
 
 ## 2. Data
 
@@ -99,12 +102,12 @@ Edit the configuration at the top of
 `lazy_onerec/scripts/embed_kuairand_items.sh`. Common parameters:
 
 ```bash
-MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
-SCOPE="clicked"       # clicked | catalog
-OUTPUT_DIM=""         # Empty: native Qwen dimension (1024); optionally use 512
-BATCH_SIZE=128
-DEVICE="auto"         # Uses CUDA automatically when available
-NORMALIZE=true
+model_name="Qwen/Qwen3-Embedding-0.6B"
+scope="clicked"       # clicked | catalog
+output_dim=""         # Empty: native Qwen dimension (1024); optionally use 512
+batch_size=128
+device="cuda"
+normalize=true
 ```
 
 Run:
@@ -124,16 +127,17 @@ lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/
 ```
 
 The script resumes automatically. To regenerate both text and embeddings, set
-`REBUILD_TEXTS=true` and `OVERWRITE=true` for one run, then reset both to
+`rebuild_texts=true` and `overwrite=true` for one run, then reset both to
 `false`.
+Text preparation and model encoding show live progress, throughput, and ETA.
 
 ## 4. Build Semantic IDs
 
 Edit `lazy_onerec/scripts/build_sid.sh`:
 
 ```bash
-METHOD="constrained-rq-kmeans"
-CODEBOOK_SIZES=(256 256 256)
+method="constrained-rq-kmeans"
+codebook_sizes=(256 256 256)
 ```
 
 Available methods:
@@ -151,13 +155,29 @@ Run:
 lazy_onerec/scripts/build_sid.sh
 ```
 
+SID construction shows live codebook-level or training-batch progress. Neural
+evaluation and final SID encoding use separate progress bars.
+
 Output:
 
 ```text
 lazy_onerec/output/kuairand_sid/
 ├── sid_index.json
 ├── codes.npy
-└── codebooks.npz
+├── codebooks.npz
+└── sid_metrics.json
+```
+
+`sid_metrics.json` evaluates clusters formed by complete SIDs. It reports the
+singleton-cluster ratio, maximum and mean cluster sizes, P50/P90/P95/P99, and
+raw and normalized SID-distribution entropy, effective-cluster perplexity, and
+collision counts and rates. Quantiles exclude unused codes.
+
+```text
+singleton-cluster ratio = size-one complete-SID clusters / effective clusters
+mean cluster size = total items / effective clusters
+SID distribution entropy = -sum(p_i * ln(p_i))
+normalized entropy = SID distribution entropy / ln(effective clusters)
 ```
 
 ## 5. Train
@@ -166,7 +186,7 @@ Edit data, model, and optimization settings at the top of
 `lazy_onerec/scripts/train_kuairand.sh`. Enable BF16 when supported:
 
 ```bash
-BF16=true
+bf16=true
 ```
 
 Run:

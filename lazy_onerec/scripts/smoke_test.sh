@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${ROOT}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${root}"
 
 # The smoke test intentionally uses a fixed tiny model in src/smoke_test.py.
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+python_bin="${python_bin:-python3}"
 
-exec "${PYTHON_BIN}" -m lazy_onerec.src.smoke_test "$@"
+exec "${python_bin}" -m lazy_onerec.src.smoke_test "$@"

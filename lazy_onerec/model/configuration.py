@@ -15,13 +15,15 @@ So computation concentrates on target decoding rather than re-encoding context.
 
 from transformers import PretrainedConfig
 
+from ..sid_layout import BOS_ID, EOS_ID, N_SPECIAL, PAD_ID
+
 
 class LazyOneRecConfig(PretrainedConfig):
     model_type = "lazy_onerec"
 
     def __init__(
         self,
-        vocab_size: int = 32000,          # = 3 specials + sum(codebook_sizes)
+        vocab_size: int = None,           # derived from special tokens + codebooks
         codebook_sizes: list = None,      # per-level K, e.g. [256,256,256] (must match SID generation)
         d_model: int = 768,
         n_layers: int = 6,
@@ -39,16 +41,22 @@ class LazyOneRecConfig(PretrainedConfig):
         rms_norm_eps: float = 1e-6,
         rope_theta: float = 10000.0,
         position_encoding: str = "rope",  # "rope" | "learned"; applies to both encoder & decoder
-        pad_token_id: int = 0,            # placeholder; set from tokenizer at build time
-        bos_token_id: int = 1,            # placeholder; set from tokenizer at build time
-        eos_token_id: int = 2,            # placeholder; set from tokenizer at build time
+        pad_token_id: int = PAD_ID,
+        bos_token_id: int = BOS_ID,
+        eos_token_id: int = EOS_ID,
         # Per-level SID input/output weights are tied manually in the model.
         # Keep HF's global tying disabled because there is no single LM head.
         tie_word_embeddings: bool = False,
         **kwargs,
     ):
-        self.vocab_size = vocab_size
         self.codebook_sizes = codebook_sizes if codebook_sizes is not None else [256, 256, 256]
+        expected_vocab_size = N_SPECIAL + sum(self.codebook_sizes)
+        if vocab_size is not None and vocab_size != expected_vocab_size:
+            raise ValueError(
+                f"vocab_size={vocab_size} does not match SID layout "
+                f"{expected_vocab_size}"
+            )
+        self.vocab_size = expected_vocab_size
         self.d_model = d_model
         self.n_layers = n_layers
         self.n_heads = n_heads
@@ -58,6 +66,8 @@ class LazyOneRecConfig(PretrainedConfig):
         self.max_target_len = max_target_len
         self.max_context_len = max_context_len
         self.kv_sharing = kv_sharing
+        if kv_share_every <= 0:
+            raise ValueError("kv_share_every must be positive")
         self.kv_share_every = kv_share_every
         self.dropout = dropout
         self.rms_norm_eps = rms_norm_eps
@@ -80,12 +90,18 @@ class LazyOneRecConfig(PretrainedConfig):
     @classmethod
     def from_codec(cls, codec, **kwargs):
         """Build a config whose vocabulary matches a SidCodec exactly."""
+        return cls.from_codebook_sizes(codec.codebook_sizes, **kwargs)
+
+    @classmethod
+    def from_codebook_sizes(cls, codebook_sizes, **kwargs):
+        """Build a config directly from raw per-level codebook sizes."""
+        sizes = [int(size) for size in codebook_sizes]
+        kwargs.setdefault("max_target_len", len(sizes) + 1)
         return cls(
-            vocab_size=codec.vocab_size,
-            codebook_sizes=list(codec.codebook_sizes),
-            max_target_len=codec.n_levels + 1,  # BOS + one token per level
-            pad_token_id=0,
-            bos_token_id=1,
-            eos_token_id=2,
+            codebook_sizes=sizes,
             **kwargs,
         )
+
+    @property
+    def kv_share_stride(self) -> int:
+        return self.kv_share_every if self.kv_sharing else 1

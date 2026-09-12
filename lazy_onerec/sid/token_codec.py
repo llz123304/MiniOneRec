@@ -3,11 +3,13 @@
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-
-PAD_ID = 0
-BOS_ID = 1
-EOS_ID = 2
-N_SPECIAL = 3
+from ..sid_layout import (
+    BOS_ID,
+    EOS_ID,
+    N_SPECIAL,
+    PAD_ID,
+    sid_level_offsets,
+)
 
 
 @dataclass(frozen=True)
@@ -28,12 +30,7 @@ class SidTokenCodec:
 
     @property
     def level_offsets(self) -> Tuple[int, ...]:
-        offsets = []
-        offset = N_SPECIAL
-        for size in self.codebook_sizes:
-            offsets.append(offset)
-            offset += size
-        return tuple(offsets)
+        return sid_level_offsets(self.codebook_sizes)
 
     @property
     def vocab_size(self) -> int:

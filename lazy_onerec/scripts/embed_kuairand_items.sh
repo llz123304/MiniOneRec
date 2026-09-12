@@ -1,86 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "${ROOT}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${root}"
 
 # Edit this section to configure item embedding.
-PYTHON_BIN="${PYTHON_BIN:-python3}"
-GPU_ID=0  # Physical GPU index from nvidia-smi.
-export CUDA_VISIBLE_DEVICES="${GPU_ID}"
+python_bin="${python_bin:-python3}"
+gpu_id=0  # Physical GPU index from nvidia-smi.
+export CUDA_VISIBLE_DEVICES="${gpu_id}"
 
 # Recommended default: strong Chinese/multilingual quality, 1024-d native
-# embeddings, and Matryoshka truncation support (for example OUTPUT_DIM=512).
-MODEL_NAME="Qwen/Qwen3-Embedding-0.6B"
+# embeddings, and Matryoshka truncation support (for example output_dim=512).
+model_name="Qwen/Qwen3-Embedding-0.6B"
 
 # Other supported choices (uncomment exactly one and comment the default):
-# MODEL_NAME="BAAI/bge-m3"                         # Multilingual, 1024 dimensions.
-# MODEL_NAME="BAAI/bge-large-zh-v1.5"             # Chinese-focused, 1024 dimensions.
-# MODEL_NAME="Alibaba-NLP/gte-Qwen2-1.5B-instruct" # Higher cost and memory usage.
-# MODEL_NAME="intfloat/multilingual-e5-large-instruct" # Multilingual; adds passage prefix.
-# MODEL_NAME="moka-ai/m3e-base"                    # Lightweight Chinese baseline, 768 dimensions.
+# model_name="BAAI/bge-m3"                         # Multilingual, 1024 dimensions.
+# model_name="BAAI/bge-large-zh-v1.5"             # Chinese-focused, 1024 dimensions.
+# model_name="Alibaba-NLP/gte-Qwen2-1.5B-instruct" # Higher cost and memory usage.
+# model_name="intfloat/multilingual-e5-large-instruct" # Multilingual; adds passage prefix.
+# model_name="moka-ai/m3e-base"                    # Lightweight Chinese baseline, 768 dimensions.
 #
 # A local Hugging Face model directory is also accepted:
-# MODEL_NAME="/data/sdb2/llz/hf_models/Qwen3-Embedding-0.6B"
+# model_name="/data/sdb2/llz/hf_models/Qwen3-Embedding-0.6B"
 
-REVISION=""
-DATA_ROOT="lazy_onerec/KuaiRand-1K"
-CAPTIONS="${DATA_ROOT}/kuairand_video_captions.csv"
-CATEGORIES="${DATA_ROOT}/kuairand_video_categories.csv"
-SCOPE="clicked"  # clicked | catalog
-WORK_DIR=""
-OUTPUT_DIR=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
+revision=""
+data_root="lazy_onerec/KuaiRand-1K"
+captions="${data_root}/kuairand_video_captions.csv"
+categories="${data_root}/kuairand_video_categories.csv"
+scope="clicked"  # clicked | catalog
+work_dir=""
+output_dir=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
 
-BATCH_SIZE=128
-WRITE_BATCH_SIZE=8192
-MAX_LENGTH=256
-OUTPUT_DIM=""  # Empty keeps the model's native dimension; use 512 for MRL.
-MODEL_DTYPE="auto"  # auto | float16 | bfloat16 | float32
-STORAGE_DTYPE="float16"  # float16 | float32
-DEVICE="auto"
-TRUST_REMOTE_CODE=true
-NORMALIZE=true
+batch_size=128
+write_batch_size=8192
+max_length=256
+output_dim=""  # Empty keeps the model's native dimension; use 512 for MRL.
+model_dtype="auto"  # auto | float16 | bfloat16 | float32
+storage_dtype="float16"  # float16 | float32
+device="cuda"
+trust_remote_code=true
+normalize=true
 
-PREPARE_ONLY=false
-REBUILD_TEXTS=false
-OVERWRITE=false
-LIMIT=""  # Set a positive integer for a smoke run.
+prepare_only=false
+rebuild_texts=false
+overwrite=false
+limit=""  # Set a positive integer for a smoke run.
 
 args=(
-  --model-name "${MODEL_NAME}"
-  --data-root "${DATA_ROOT}"
-  --captions "${CAPTIONS}"
-  --categories "${CATEGORIES}"
-  --scope "${SCOPE}"
-  --batch-size "${BATCH_SIZE}"
-  --write-batch-size "${WRITE_BATCH_SIZE}"
-  --max-length "${MAX_LENGTH}"
-  --model-dtype "${MODEL_DTYPE}"
-  --storage-dtype "${STORAGE_DTYPE}"
-  --device "${DEVICE}"
+  --model-name "${model_name}"
+  --data-root "${data_root}"
+  --captions "${captions}"
+  --categories "${categories}"
+  --scope "${scope}"
+  --batch-size "${batch_size}"
+  --write-batch-size "${write_batch_size}"
+  --max-length "${max_length}"
+  --model-dtype "${model_dtype}"
+  --storage-dtype "${storage_dtype}"
+  --device "${device}"
 )
 
-[[ -n "${REVISION}" ]] && args+=(--revision "${REVISION}")
-[[ -n "${WORK_DIR}" ]] && args+=(--work-dir "${WORK_DIR}")
-[[ -n "${OUTPUT_DIR}" ]] && args+=(--output-dir "${OUTPUT_DIR}")
-[[ -n "${OUTPUT_DIM}" ]] && args+=(--output-dim "${OUTPUT_DIM}")
-[[ -n "${LIMIT}" ]] && args+=(--limit "${LIMIT}")
+[[ -n "${revision}" ]] && args+=(--revision "${revision}")
+[[ -n "${work_dir}" ]] && args+=(--work-dir "${work_dir}")
+[[ -n "${output_dir}" ]] && args+=(--output-dir "${output_dir}")
+[[ -n "${output_dim}" ]] && args+=(--output-dim "${output_dim}")
+[[ -n "${limit}" ]] && args+=(--limit "${limit}")
 
-if [[ "${TRUST_REMOTE_CODE}" == "true" ]]; then
+if [[ "${trust_remote_code}" == "true" ]]; then
   args+=(--trust-remote-code)
 else
   args+=(--no-trust-remote-code)
 fi
 
-if [[ "${NORMALIZE}" == "true" ]]; then
+if [[ "${normalize}" == "true" ]]; then
   args+=(--normalize)
 else
   args+=(--no-normalize)
 fi
 
-[[ "${PREPARE_ONLY}" == "true" ]] && args+=(--prepare-only)
-[[ "${REBUILD_TEXTS}" == "true" ]] && args+=(--rebuild-texts)
-[[ "${OVERWRITE}" == "true" ]] && args+=(--overwrite)
+[[ "${prepare_only}" == "true" ]] && args+=(--prepare-only)
+[[ "${rebuild_texts}" == "true" ]] && args+=(--rebuild-texts)
+[[ "${overwrite}" == "true" ]] && args+=(--overwrite)
 
 # Arguments supplied at invocation time are appended last and override defaults.
-exec "${PYTHON_BIN}" -m lazy_onerec.src.embed_kuairand_items "${args[@]}" "$@"
+exec "${python_bin}" -m lazy_onerec.src.embed_kuairand_items "${args[@]}" "$@"

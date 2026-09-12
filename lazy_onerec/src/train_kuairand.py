@@ -29,6 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-context-layers", type=int, default=2)
     parser.add_argument("--n-heads", type=int, default=12)
     parser.add_argument("--n-kv-heads", type=int, default=2)
+    parser.add_argument(
+        "--kv-sharing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
     parser.add_argument("--kv-share-every", type=int, default=2)
     parser.add_argument(
         "--position-encoding", choices=["rope", "learned"], default="rope"
@@ -87,6 +92,7 @@ def main() -> None:
         n_context_layers=args.n_context_layers,
         n_heads=args.n_heads,
         n_kv_heads=args.n_kv_heads,
+        kv_sharing=args.kv_sharing,
         kv_share_every=args.kv_share_every,
         max_context_len=args.max_history,
         position_encoding=args.position_encoding,
@@ -125,6 +131,12 @@ def main() -> None:
     )
     trainer.train()
     trainer.save_model(args.output_dir)
+    if datasets["test"]:
+        test_metrics = trainer.evaluate(
+            eval_dataset=datasets["test"],
+            metric_key_prefix="test",
+        )
+        trainer.save_metrics("test", test_metrics)
     print(f"[done] model saved to {args.output_dir}")
 
 

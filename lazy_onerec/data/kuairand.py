@@ -15,19 +15,10 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+from ..kuairand_schema import BINARY_EVENT_FIELDS
 from ..sid.artifact import SemanticIDArtifact
 from ..sid.token_codec import SidTokenCodec
 
-
-BINARY_HISTORY_FIELDS = (
-    "long_view",
-    "is_like",
-    "is_follow",
-    "is_comment",
-    "is_forward",
-    "is_hate",
-    "is_profile_enter",
-)
 
 LOG_COLUMNS = (
     "user_id",
@@ -35,7 +26,7 @@ LOG_COLUMNS = (
     "date",
     "time_ms",
     "is_click",
-    *BINARY_HISTORY_FIELDS,
+    *BINARY_EVENT_FIELDS,
     "play_time_ms",
     "duration_ms",
     "tab",
@@ -47,7 +38,7 @@ LOG_DTYPES = {
     "date": np.int32,
     "time_ms": np.int64,
     "is_click": np.int8,
-    **{field: np.int8 for field in BINARY_HISTORY_FIELDS},
+    **{field: np.int8 for field in BINARY_EVENT_FIELDS},
     "play_time_ms": np.int32,
     "duration_ms": np.int32,
     "tab": np.int8,
@@ -153,7 +144,7 @@ class KuaiRandClickCorpus:
                     time_ms=group["time_ms"].to_numpy(np.int64),
                     binary={
                         field: group[field].to_numpy(np.int8)
-                        for field in BINARY_HISTORY_FIELDS
+                        for field in BINARY_EVENT_FIELDS
                     },
                     play_ratio_bucket=group[
                         "play_ratio_bucket"
@@ -240,7 +231,7 @@ class KuaiRandNextSidDataset(Dataset):
             "target_input_ids": self.sid_codec.decoder_inputs(target_codes),
             "labels": self.sid_codec.decoder_labels(target_codes),
         }
-        for field in BINARY_HISTORY_FIELDS:
+        for field in BINARY_EVENT_FIELDS:
             example[f"context_{field}"] = sequence.binary[field][
                 history_slice
             ].tolist()
@@ -259,7 +250,7 @@ class KuaiRandCollator:
             "context_play_ratio_bucket",
             "context_time_gap_bucket",
             "context_tab",
-            *(f"context_{field}" for field in BINARY_HISTORY_FIELDS),
+            *(f"context_{field}" for field in BINARY_EVENT_FIELDS),
         ]
 
         batch: Dict[str, torch.Tensor] = {}

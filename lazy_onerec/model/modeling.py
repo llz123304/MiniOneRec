@@ -28,6 +28,7 @@ from transformers import PreTrainedModel
 from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
+from ..sid_layout import N_SPECIAL, sid_level_offsets
 from .configuration import LazyOneRecConfig
 
 
@@ -135,18 +136,14 @@ class SidEmbedding(nn.Module):
 
     def __init__(self, config: LazyOneRecConfig):
         super().__init__()
-        self.n_special = 3  # PAD, BOS, EOS
+        self.n_special = N_SPECIAL
         self.codebook_sizes = list(config.codebook_sizes)
         self.special_emb = nn.Embedding(self.n_special, config.d_model, config.pad_token_id)
         self.level_emb = nn.ModuleList(
             [nn.Embedding(k, config.d_model) for k in self.codebook_sizes]
         )
-        offsets, acc = [], self.n_special
-        for k in self.codebook_sizes:
-            offsets.append(acc)
-            acc += k
+        offsets = sid_level_offsets(self.codebook_sizes)
         self.register_buffer("level_offsets", torch.tensor(offsets), persistent=False)
-        self._vocab_size = acc
 
     def forward(self, ids: torch.LongTensor) -> torch.Tensor:
         out = ids.new_zeros(*ids.shape, self.special_emb.embedding_dim, dtype=self.special_emb.weight.dtype)
@@ -196,7 +193,10 @@ class ContextProcessor(nn.Module):
         self.encoder_layers = nn.ModuleList(
             [ContextEncoderLayer(config) for _ in range(config.n_context_layers)]
         )
-        self.n_kv_blocks = (config.n_layers + config.kv_share_every - 1) // config.kv_share_every
+        share_stride = config.kv_share_stride
+        self.n_kv_blocks = (
+            config.n_layers + share_stride - 1
+        ) // share_stride
         kv_dim = config.n_kv_heads * config.head_dim
         # One (K, V) projection per KV block. Cheap on purpose.
         self.k_proj = nn.ModuleList([nn.Linear(config.d_model, kv_dim, bias=False) for _ in range(self.n_kv_blocks)])
@@ -344,21 +344,19 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
             self.target_pos_emb = nn.Parameter(torch.zeros(config.max_target_len, config.d_model))
             nn.init.trunc_normal_(self.target_pos_emb, std=0.02)
         self.layers = nn.ModuleList(
-            [LazyDecoderBlock(config, kv_block_idx=i // config.kv_share_every) for i in range(config.n_layers)]
+            [
+                LazyDecoderBlock(
+                    config,
+                    kv_block_idx=i // config.kv_share_stride,
+                )
+                for i in range(config.n_layers)
+            ]
         )
         self.norm = RMSNorm(config.d_model, config.rms_norm_eps)
         # Decoder position i predicts codebook level i. No separate classifiers:
         # output scores reuse the corresponding per-level embedding matrix.
         self.codebook_sizes = list(config.codebook_sizes)
         self.n_sid_levels = len(self.codebook_sizes)
-        # Global-id offset where each level's code range begins (specials first).
-        # Matches sid.token_codec: id = n_special + sum(K[:level]) + code.
-        n_special = 3  # PAD, BOS, EOS
-        offsets, acc = [], n_special
-        for k in self.codebook_sizes:
-            offsets.append(acc)
-            acc += k
-        self.register_buffer("level_offsets", torch.tensor(offsets), persistent=False)
         self.post_init()  # random init of all weights (from scratch)
 
     # -- input embedding plumbing (vocabulary is fixed by codebook_sizes; the
@@ -428,7 +426,7 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
             code_logits = F.linear(
                 x[:, t, :], self.embed_tokens.level_emb[level].weight
             )  # (B, K_level)
-            start = int(self.level_offsets[level])
+            start = int(self.embed_tokens.level_offsets[level])
             logits[:, t, start : start + code_logits.size(-1)] = code_logits
 
         loss = None

@@ -24,6 +24,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 
 
 CATEGORY_FIELDS = (
@@ -199,11 +200,17 @@ def clicked_video_ids(
     max_video_id = int(catalog_ids.max())
     selected = np.zeros(max_video_id + 1, dtype=np.bool_)
     for path in sorted(data_dir.glob("log_standard_*_*.csv")):
-        for chunk in pd.read_csv(
+        chunks = pd.read_csv(
             path,
             usecols=["video_id", "is_click"],
             dtype={"video_id": np.int32, "is_click": np.int8},
             chunksize=500_000,
+        )
+        for chunk in tqdm(
+            chunks,
+            desc=f"Scanning {path.name}",
+            unit="chunk",
+            dynamic_ncols=True,
         ):
             ids = chunk.loc[chunk["is_click"].eq(1), "video_id"].to_numpy(
                 np.int64
@@ -301,7 +308,13 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
         SortedCsvLookup(catalog_path, "video_id") as basics,
         temporary_texts.open("w", encoding="utf-8") as target,
     ):
-        for index, item_id_value in enumerate(ids):
+        for item_id_value in tqdm(
+            ids,
+            total=len(ids),
+            desc="Preparing item text",
+            unit="item",
+            dynamic_ncols=True,
+        ):
             item_id = int(item_id_value)
             caption_row = captions.get(item_id)
             category_row = categories.get(item_id)
@@ -332,8 +345,6 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
                 )
                 + "\n"
             )
-            if (index + 1) % 100_000 == 0:
-                print(f"prepared texts: {index + 1}/{len(ids)}")
 
     np.save(ids_path, ids.astype(np.int32, copy=False))
     os.replace(temporary_texts, texts_path)
@@ -542,34 +553,41 @@ def encode_items(
             {"next_index": 0, "num_items": len(item_ids)},
         )
 
-    for batch_start, texts in iter_text_batches(
-        texts_path,
-        item_ids,
-        start,
-        args.write_batch_size,
-        profile.document_prefix,
-    ):
-        values = model.encode(
-            texts,
-            batch_size=args.batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=False,
-        ).astype(np.float32, copy=False)
-        values = values[:, :output_dim]
-        if args.normalize:
-            norms = np.linalg.norm(values, axis=1, keepdims=True)
-            values = values / np.maximum(norms, 1e-12)
-        batch_end = batch_start + len(values)
-        embeddings[batch_start:batch_end] = values.astype(
-            args.storage_dtype, copy=False
-        )
-        embeddings.flush()
-        atomic_json(
-            progress_path,
-            {"next_index": batch_end, "num_items": len(item_ids)},
-        )
-        print(f"encoded items: {batch_end}/{len(item_ids)}")
+    with tqdm(
+        total=len(item_ids),
+        initial=start,
+        desc="Encoding items",
+        unit="item",
+        dynamic_ncols=True,
+    ) as progress:
+        for batch_start, texts in iter_text_batches(
+            texts_path,
+            item_ids,
+            start,
+            args.write_batch_size,
+            profile.document_prefix,
+        ):
+            values = model.encode(
+                texts,
+                batch_size=args.batch_size,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                normalize_embeddings=False,
+            ).astype(np.float32, copy=False)
+            values = values[:, :output_dim]
+            if args.normalize:
+                norms = np.linalg.norm(values, axis=1, keepdims=True)
+                values = values / np.maximum(norms, 1e-12)
+            batch_end = batch_start + len(values)
+            embeddings[batch_start:batch_end] = values.astype(
+                args.storage_dtype, copy=False
+            )
+            embeddings.flush()
+            atomic_json(
+                progress_path,
+                {"next_index": batch_end, "num_items": len(item_ids)},
+            )
+            progress.update(len(values))
 
     config["completed"] = True
     atomic_json(config_path, config)
@@ -626,7 +644,7 @@ def parse_args() -> argparse.Namespace:
         choices=("float16", "float32"),
         default="float16",
     )
-    parser.add_argument("--device", default="auto")
+    parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--trust-remote-code",
         action=argparse.BooleanOptionalAction,
