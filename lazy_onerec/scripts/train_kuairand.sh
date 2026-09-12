@@ -6,6 +6,8 @@ cd "${ROOT}"
 
 # Edit this section to configure KuaiRand training.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+GPU_ID=0  # Physical GPU index from nvidia-smi.
+export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 DATA_ROOT="lazy_onerec/KuaiRand-1K"
 SID_ARTIFACT="lazy_onerec/output/kuairand_sid/sid_index.json"
 OUTPUT_DIR="lazy_onerec/output/kuairand_model"

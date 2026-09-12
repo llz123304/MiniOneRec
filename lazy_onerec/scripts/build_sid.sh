@@ -6,6 +6,8 @@ cd "${ROOT}"
 
 # Edit this section to configure SID construction.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+GPU_ID=0  # Used by rq-vae and rq-kmeans-plus.
+export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 METHOD="constrained-rq-kmeans"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
 EMBEDDINGS="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/item_embeddings.npy"
 ITEM_IDS="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-clicked/item_ids.npy"

@@ -53,6 +53,15 @@ cuda: 12.1
 available: True
 ```
 
+To select a physical GPU, edit the embedding, SID, or training shell script:
+
+```bash
+GPU_ID=0
+```
+
+Use the index reported by `nvidia-smi`. The selected physical GPU is exposed
+inside the process as `cuda:0`, so keep `DEVICE` set to `"auto"` or `"cuda"`.
+
 For a CUDA 11.8 server, replace `cu121` with `cu118` in the PyTorch index URL.
 For macOS or CPU-only environments, use:
 

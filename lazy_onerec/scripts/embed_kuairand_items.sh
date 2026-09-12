@@ -6,6 +6,8 @@ cd "${ROOT}"
 
 # Edit this section to configure item embedding.
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+GPU_ID=0  # Physical GPU index from nvidia-smi.
+export CUDA_VISIBLE_DEVICES="${GPU_ID}"
 
 # Recommended default: strong Chinese/multilingual quality, 1024-d native
 # embeddings, and Matryoshka truncation support (for example OUTPUT_DIM=512).

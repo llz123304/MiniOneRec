@@ -53,6 +53,15 @@ cuda: 12.1
 available: True
 ```
 
+需要指定物理 GPU 时，在 embedding、SID 或训练 Shell 顶部修改：
+
+```bash
+GPU_ID=0
+```
+
+编号以 `nvidia-smi` 为准。设置后该物理 GPU 在进程内映射为 `cuda:0`，
+因此 `DEVICE` 保持 `"auto"` 或 `"cuda"`，不要再改成 `"cuda:1"`。
+
 CUDA 11.8 服务器只需将安装地址中的 `cu121` 改为 `cu118`。macOS 或
 CPU 环境使用：
 
