@@ -1,20 +1,12 @@
-"""Two-stream dataset + collator for the Lazy Decoder-Only recommender.
+"""Amazon/MiniOneRec-format dataset example.
 
-The Lazy Decoder needs the two streams SEPARATE so the context can be encoded
-once into static KV:
+This is not part of the core model contract. It demonstrates how one legacy
+CSV format can consume a framework-neutral SemanticIDArtifact. Replace it with
+your own KuaiRand/GID sequence-slot pipeline.
 
-    context_input_ids : the user's chronological history SIDs (encoded -> KV)
-    target_input_ids  : [BOS] + the codebook token ids of the next item
-    labels            : target_input_ids with BOS masked to -100
-
-Token ids are NUMERIC (see sid_codec.SidCodec): the model is trained from
-scratch with its own vocabulary, so we do not use a tokenizer. Each item maps to
-one code per codebook level, and each level occupies its own id range.
-
-CSV columns used (see data/Amazon/.../*.csv):
+Expected legacy CSV columns:
     history_item_id : list-as-string of integer item ids
     item_id         : integer item id (ground-truth next item)
-We look each item id up in the index (item_id -> [c0, c1, c2]) via SidCodec.
 """
 
 from typing import List, Dict
@@ -24,16 +16,17 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from .sid_codec import SidCodec, PAD_ID
+from ..sid.artifact import SemanticIDArtifact
+from ..sid.token_codec import PAD_ID, SidTokenCodec
 
 
-class LazySidSeqDataset(Dataset):
-    """Sequential recommendation in the two-stream numeric-SID format."""
+class AmazonSidSequenceDataset(Dataset):
+    """Example adapter from MiniOneRec Amazon CSVs to model-ready fields."""
 
-    def __init__(self, train_file: str, codec: SidCodec, item_codes: Dict[str, List[int]],
+    def __init__(self, train_file: str, sid_artifact: SemanticIDArtifact,
                  max_context_len: int = 3000, sample: int = -1, seed: int = 0):
-        self.codec = codec
-        self.item_codes = item_codes
+        self.codec = SidTokenCodec(sid_artifact.codebook_sizes)
+        self.item_codes = sid_artifact.item_codes
         self.max_context_len = max_context_len
 
         self.data = pd.read_csv(train_file)

@@ -1,7 +1,7 @@
 """Smoke test for the Lazy Decoder-Only skeleton.
 
 Run on a machine with PyTorch installed:
-    python -m lazy_onerec.smoke_test
+    python -m lazy_onerec.src.smoke_test
 
 It builds a tiny model, runs one forward with random context/target ids, and
 checks that loss/logits shapes are sane and backprop works. This is a STRUCTURE
@@ -10,8 +10,7 @@ check (shapes + gradients), not a training run.
 
 import torch
 
-from .configuration_lazy_onerec import LazyOneRecConfig
-from .modeling_lazy_onerec import LazyOneRecForCausalLM
+from ..model import LazyOneRecConfig, LazyOneRecForCausalLM
 
 
 def main():
@@ -32,13 +31,24 @@ def main():
         )
         model = LazyOneRecForCausalLM(cfg)
         model.train()
-        assert len(model.level_heads) == 3, len(model.level_heads)
+        assert len(model.embed_tokens.level_emb) == 3
 
-        B, Lc, Lt = 3, 20, 4  # batch, context len, target len (BOS + 3 codes)
-        context_input_ids = torch.randint(0, cfg.vocab_size, (B, Lc))
-        context_attention_mask = torch.ones(B, Lc)
-        target_input_ids = torch.randint(0, cfg.vocab_size, (B, Lt))
+        B, n_items, Lt = 3, 6, 4
+        level_codes = [
+            torch.randint(0, 128, (B, n_items)) + 3 + level * 128
+            for level in range(3)
+        ]
+        context_input_ids = torch.stack(level_codes, dim=-1).reshape(B, -1)
+        context_attention_mask = torch.ones_like(context_input_ids)
+        target_codes = torch.stack(
+            [torch.randint(0, 128, (B,)) + 3 + level * 128 for level in range(3)],
+            dim=-1,
+        )
+        target_input_ids = torch.cat(
+            [torch.full((B, 1), cfg.bos_token_id), target_codes], dim=-1
+        )
         labels = target_input_ids.clone()
+        labels[:, 0] = -100
 
         out = model(
             context_input_ids=context_input_ids,
@@ -52,7 +62,7 @@ def main():
         out.loss.backward()
         n_grad = sum(1 for p in model.parameters() if p.grad is not None)
         print(f"OK [pe={pe}]  loss={out.loss.item():.4f}  logits={tuple(out.logits.shape)}  "
-              f"heads={len(model.level_heads)}  params_with_grad={n_grad}  "
+              f"tied_codebooks={model.n_sid_levels}  params_with_grad={n_grad}  "
               f"n_kv_blocks={model.context_processor.n_kv_blocks}")
 
 

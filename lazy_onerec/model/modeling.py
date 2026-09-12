@@ -9,12 +9,12 @@ review/tune before training:
   2. LazyCrossAttention         -> KV-sharing + GQA read of the context KV
   3. generate() integration     -> encode context once, cache it, decode target
 
-Design contract (so it plugs into the existing repo):
-  - Subclasses PreTrainedModel + GenerationMixin  => free resize_token_embeddings()
-    and generate(); we only implement forward() and the network.
-  - forward(context_input_ids, context_attention_mask, target_input_ids, labels)
-    returns CausalLMOutputWithPast(loss=..., logits=...), so transformers.Trainer
-    in sft.py works unchanged once the dataset yields these fields.
+Design contract:
+  - Target SID codes use the model's per-level SID embedding tables.
+  - Context can be supplied either as SID token ids or as caller-owned
+    ``context_inputs_embeds``. The latter keeps upstream GID/action sequence
+    slots independent from SID generation.
+  - forward() returns CausalLMOutputWithPast(loss=..., logits=...).
 
 NOTE: weights are randomly initialized (from-scratch). There is NO from_pretrained.
 """
@@ -28,7 +28,7 @@ from transformers import PreTrainedModel
 from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .configuration_lazy_onerec import LazyOneRecConfig
+from .configuration import LazyOneRecConfig
 
 
 # --------------------------------------------------------------------------- #
@@ -121,17 +121,16 @@ class ContextEncoderLayer(nn.Module):
 
 
 class SidEmbedding(nn.Module):
-    """Per-level SID input embedding (aligns with sentiment/models).
+    """Per-level SID embedding tables shared by input lookup and output scoring.
 
     One independent table per codebook level (sid_emb_table_layer_i) plus a small
-    table for the special tokens (PAD/BOS/EOS). Parameters are NOT shared across
-    levels: level i has its own vocabulary of K_i codes, exactly mirroring the
-    per-level output heads. Class index c at level i and at level j map to
-    different embeddings.
+    table for the special tokens (PAD/BOS/EOS). Parameters are not shared across
+    levels. For level i, the same table is used both to embed input code c and
+    to score output class c via hidden @ embedding_i.T.
 
     Call signature matches nn.Embedding (global token ids in -> vectors out), so
     both the context encoder and the decoder use it transparently. Global id
-    layout (see sid_codec): [PAD, BOS, EOS] then level-0 codes, level-1, ...
+    layout (see sid.token_codec): [PAD, BOS, EOS], then each SID level.
     """
 
     def __init__(self, config: LazyOneRecConfig):
@@ -204,9 +203,22 @@ class ContextProcessor(nn.Module):
         self.v_proj = nn.ModuleList([nn.Linear(config.d_model, kv_dim, bias=False) for _ in range(self.n_kv_blocks)])
         self.norm = RMSNorm(config.d_model, config.rms_norm_eps)
 
-    def forward(self, context_input_ids, context_attention_mask=None):
+    def forward(
+        self,
+        context_input_ids=None,
+        context_inputs_embeds=None,
+        context_attention_mask=None,
+    ):
         cfg = self.config
-        h = self.embed_tokens(context_input_ids)  # (B, Lc, D)
+        if (context_input_ids is None) == (context_inputs_embeds is None):
+            raise ValueError(
+                "provide exactly one of context_input_ids or context_inputs_embeds"
+            )
+        h = (
+            self.embed_tokens(context_input_ids)
+            if context_inputs_embeds is None
+            else context_inputs_embeds
+        )
         cos = sin = None
         if self.use_learned_pe:
             h = h + self.pos_emb[: h.size(1)].unsqueeze(0)  # learned absolute PE
@@ -335,16 +347,12 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
             [LazyDecoderBlock(config, kv_block_idx=i // config.kv_share_every) for i in range(config.n_layers)]
         )
         self.norm = RMSNorm(config.d_model, config.rms_norm_eps)
-        # Per-level output heads (aligns with sentiment/models: one head per
-        # codebook level, each projecting to that level's K codes only).
-        # Decoder output position i predicts codebook level i.
+        # Decoder position i predicts codebook level i. No separate classifiers:
+        # output scores reuse the corresponding per-level embedding matrix.
         self.codebook_sizes = list(config.codebook_sizes)
         self.n_sid_levels = len(self.codebook_sizes)
-        self.level_heads = nn.ModuleList(
-            [nn.Linear(config.d_model, k, bias=False) for k in self.codebook_sizes]
-        )
         # Global-id offset where each level's code range begins (specials first).
-        # Matches sid_codec: id = n_special + sum(K[:level]) + code.
+        # Matches sid.token_codec: id = n_special + sum(K[:level]) + code.
         n_special = 3  # PAD, BOS, EOS
         offsets, acc = [], n_special
         for k in self.codebook_sizes:
@@ -362,13 +370,14 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         self.embed_tokens = value
 
     def get_output_embeddings(self):
-        # Per-level heads; no single tied output matrix. Return None so HF
-        # utilities that look for one simply skip tying.
+        # Output weights are tied manually per level in forward(); there is no
+        # single output matrix for generic Hugging Face weight tying.
         return None
 
     def forward(
         self,
         context_input_ids: Optional[torch.LongTensor] = None,
+        context_inputs_embeds: Optional[torch.Tensor] = None,
         context_attention_mask: Optional[torch.Tensor] = None,
         target_input_ids: Optional[torch.LongTensor] = None,
         labels: Optional[torch.LongTensor] = None,
@@ -380,7 +389,9 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         # 1) Encode context ONCE (skip if already cached during generation).
         if context_kv_blocks is None:
             context_kv_blocks, context_attention_mask = self.context_processor(
-                context_input_ids, context_attention_mask
+                context_input_ids=context_input_ids,
+                context_inputs_embeds=context_inputs_embeds,
+                context_attention_mask=context_attention_mask,
             )
 
         # 2) Decode the target sequence.
@@ -405,20 +416,20 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
 
         x = self.norm(x)
 
-        # Per-level heads: decoder output position t predicts codebook level t.
-        # Each head outputs only its level's K codes; we scatter them into a
-        # full-vocab logits tensor (other entries -inf) so downstream CE loss
-        # and constrained decoding see a standard (B, T, vocab) tensor while a
-        # token can only ever be predicted within its own level.
+        # Decoder output position t predicts codebook level t. Score that level
+        # with its input embedding matrix (weight tying), then scatter into a
+        # full-vocabulary tensor for standard CE and generation APIs.
         B, T, _ = x.shape
         neg_inf = torch.finfo(x.dtype).min
         logits = x.new_full((B, T, self.config.vocab_size), neg_inf)
         for t in range(T):
             abs_pos = seq_start + t  # absolute position (supports incremental decode)
             level = abs_pos if abs_pos < self.n_sid_levels else self.n_sid_levels - 1
-            head_logits = self.level_heads[level](x[:, t, :])  # (B, K_level)
+            code_logits = F.linear(
+                x[:, t, :], self.embed_tokens.level_emb[level].weight
+            )  # (B, K_level)
             start = int(self.level_offsets[level])
-            logits[:, t, start : start + head_logits.size(-1)] = head_logits
+            logits[:, t, start : start + code_logits.size(-1)] = code_logits
 
         loss = None
         if labels is not None:

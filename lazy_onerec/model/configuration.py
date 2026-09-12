@@ -42,7 +42,9 @@ class LazyOneRecConfig(PretrainedConfig):
         pad_token_id: int = 0,            # placeholder; set from tokenizer at build time
         bos_token_id: int = 1,            # placeholder; set from tokenizer at build time
         eos_token_id: int = 2,            # placeholder; set from tokenizer at build time
-        tie_word_embeddings: bool = False,  # per-level heads: no single output matrix to tie
+        # Per-level SID input/output weights are tied manually in the model.
+        # Keep HF's global tying disabled because there is no single LM head.
+        tie_word_embeddings: bool = False,
         **kwargs,
     ):
         self.vocab_size = vocab_size

@@ -1,14 +1,6 @@
-from .configuration_lazy_onerec import LazyOneRecConfig
-from .modeling_lazy_onerec import LazyOneRecForCausalLM
-from .data_lazy import LazySidSeqDataset, LazyTwoStreamCollator
-from .sid_codec import SidCodec, build_codec_from_index, load_index_as_codes
+"""User-owned model, data adapters, SID generation, and scripts.
 
-__all__ = [
-    "LazyOneRecConfig",
-    "LazyOneRecForCausalLM",
-    "LazySidSeqDataset",
-    "LazyTwoStreamCollator",
-    "SidCodec",
-    "build_codec_from_index",
-    "load_index_as_codes",
-]
+Import from explicit subpackages (``lazy_onerec.model`` or
+``lazy_onerec.sid``). Keeping this module import-free allows SID generation to
+run without installing the model stack.
+"""
