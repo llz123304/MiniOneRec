@@ -64,7 +64,7 @@ lazy_onerec/scripts/sample_kuairand_metadata.sh
 model_name="Qwen/Qwen3-Embedding-0.6B"
 scope="catalog"       # 全部视频；clicked 仅处理点击过的视频
 output_dim=""         # Qwen 原生 1024 维；设为 512 使用 MRL 降维
-batch_size=1024
+batch_size=512
 device="cuda"
 normalize=true
 ```

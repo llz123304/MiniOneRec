@@ -64,7 +64,7 @@ Set these values in `embed_kuairand_items.sh`:
 model_name="Qwen/Qwen3-Embedding-0.6B"
 scope="catalog"       # All videos; clicked processes clicked videos only
 output_dim=""         # Native Qwen dimension is 1024; use 512 for MRL
-batch_size=1024
+batch_size=512
 device="cuda"
 normalize=true
 ```

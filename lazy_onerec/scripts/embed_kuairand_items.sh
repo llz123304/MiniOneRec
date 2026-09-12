@@ -31,7 +31,7 @@ scope="catalog"  # clicked | catalog
 work_dir=""
 output_dir=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
 
-batch_size=1024
+batch_size=512
 write_batch_size=8192
 max_length=256
 output_dim=""  # Empty keeps the model's native dimension; use 512 for MRL.
