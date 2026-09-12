@@ -27,11 +27,11 @@ revision=""
 data_root="lazy_onerec/KuaiRand-1K"
 captions="${data_root}/kuairand_video_captions.csv"
 categories="${data_root}/kuairand_video_categories.csv"
-scope="clicked"  # clicked | catalog
+scope="catalog"  # clicked | catalog
 work_dir=""
 output_dir=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
 
-batch_size=128
+batch_size=1024
 write_batch_size=8192
 max_length=256
 output_dim=""  # Empty keeps the model's native dimension; use 512 for MRL.
