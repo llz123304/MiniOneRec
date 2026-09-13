@@ -66,7 +66,7 @@ scope="catalog"       # 全部视频；clicked 仅处理点击过的视频
 output_dim=""         # Qwen 原生 1024 维；设为 512 使用 MRL 降维
 batch_size=512
 device="cuda"
-normalize=true
+normalize=false       # 保存原始向量；SID 余弦模式会在构建时归一化
 ```
 
 执行：
@@ -78,7 +78,7 @@ lazy_onerec/scripts/embed_kuairand_items.sh
 输出：
 
 ```text
-lazy_onerec/output/embeddings/<model>-<scope>/
+lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/
 ├── item_ids.npy
 ├── item_embeddings.npy
 ├── embedding_config.json

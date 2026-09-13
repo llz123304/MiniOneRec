@@ -430,11 +430,13 @@ def encode_items(
         ) from error
 
     profile = resolve_profile(args.model_name)
+    normalization_suffix = "" if args.normalize else "-raw"
     output_dir = Path(
         args.output_dir
         or (
             f"lazy_onerec/output/embeddings/"
             f"{model_slug(args.model_name)}-{args.scope}"
+            f"{normalization_suffix}"
         )
     )
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -653,7 +655,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--normalize",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
     )
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--rebuild-texts", action="store_true")

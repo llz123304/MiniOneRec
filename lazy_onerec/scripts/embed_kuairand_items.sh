@@ -29,7 +29,7 @@ captions="${data_root}/kuairand_video_captions.csv"
 categories="${data_root}/kuairand_video_categories.csv"
 scope="catalog"  # clicked | catalog
 work_dir=""
-output_dir=""  # Empty selects output/embeddings/<model-name>-<scope> automatically.
+output_dir=""  # Empty selects output/embeddings/<model>-<scope>-raw.
 
 batch_size=512
 write_batch_size=8192
@@ -39,7 +39,7 @@ model_dtype="auto"  # auto | float16 | bfloat16 | float32
 storage_dtype="float16"  # float16 | float32
 device="cuda"
 trust_remote_code=true
-normalize=true
+normalize=false
 
 prepare_only=false
 rebuild_texts=false

@@ -66,7 +66,7 @@ scope="catalog"       # All videos; clicked processes clicked videos only
 output_dim=""         # Native Qwen dimension is 1024; use 512 for MRL
 batch_size=512
 device="cuda"
-normalize=true
+normalize=false       # Save raw vectors; SID cosine mode normalizes them
 ```
 
 Run:
@@ -78,7 +78,7 @@ lazy_onerec/scripts/embed_kuairand_items.sh
 Output:
 
 ```text
-lazy_onerec/output/embeddings/<model>-<scope>/
+lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/
 ├── item_ids.npy
 ├── item_embeddings.npy
 ├── embedding_config.json

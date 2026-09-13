@@ -9,8 +9,8 @@ python_bin="${python_bin:-python3}"
 gpu_id=0  # Used by rq-vae and rq-kmeans-plus.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 method="${method:-rq-kmeans}"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
-embeddings="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog/item_embeddings.npy"
-item_ids="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog/item_ids.npy"
+embeddings="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_embeddings.npy"
+item_ids="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_ids.npy"
 require_unique=false
 
 # Select one experiment preset.
