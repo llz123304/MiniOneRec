@@ -115,9 +115,9 @@ Available presets:
 1024-512-256-cosine
 ```
 
-`rq-kmeans` requires equal sizes at all levels; use another method for
-asymmetric presets. Cosine mode normalizes inputs and uses cosine assignment
-in neural quantizers.
+`rq-kmeans` supports a different power-of-two codebook at each level; for
+example, `256-512-1024` uses `nbits=[8,9,10]`. Cosine mode normalizes inputs
+and uses cosine assignment in neural quantizers.
 With pre-normalized embeddings, FAISS `rq-kmeans` may produce identical
 Euclidean and cosine results; use constrained or neural methods for that
 distance comparison.

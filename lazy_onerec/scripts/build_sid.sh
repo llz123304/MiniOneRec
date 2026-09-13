@@ -46,13 +46,6 @@ case "${preset}" in
     ;;
 esac
 
-if [[ "${method}" == "rq-kmeans" ]] &&
-   [[ "${codebook_sizes[0]}" != "${codebook_sizes[1]}" ||
-      "${codebook_sizes[1]}" != "${codebook_sizes[2]}" ]]; then
-  echo "rq-kmeans requires equal codebook sizes; choose another method" >&2
-  exit 2
-fi
-
 output_dir="lazy_onerec/output/kuairand_sid/${method}-${preset}"
 
 # K-means parameters.
