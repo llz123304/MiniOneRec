@@ -98,22 +98,12 @@ Set these values in `build_sid.sh`:
 
 ```bash
 method="rq-kmeans"
-preset="512-512-512-cosine"
+codebook_sizes=(512 512 512)
+distance_metric="cosine"  # euclidean | cosine
 ```
 
 `method` supports `rq-kmeans`, `constrained-rq-kmeans`, `rq-vae`, and
 `rq-kmeans-plus`.
-
-Available presets:
-
-```text
-256-256-256-euclidean
-256-256-256-cosine
-512-512-512-cosine
-256-512-1024-cosine
-1024-512-256-euclidean
-1024-512-256-cosine
-```
 
 `rq-kmeans` supports a different power-of-two codebook at each level; for
 example, `256-512-1024` uses `nbits=[8,9,10]`. Cosine mode normalizes inputs
@@ -131,15 +121,20 @@ lazy_onerec/scripts/build_sid.sh
 Output:
 
 ```text
-lazy_onerec/output/kuairand_sid/<method>-<preset>/
+lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 ├── sid_index.json
 ├── codes.npy
 ├── codebooks.npz
 └── sid_metrics.json
 ```
 
-`sid_metrics.json` contains collision rate, singleton-cluster ratio, maximum
-and mean cluster sizes, P50/P90/P95/P99, and SID-distribution entropy.
+`sid_metrics.json` contains full SID-space utilization, collision rate,
+singleton-cluster ratio, maximum and mean cluster sizes, P50/P90/P95/P99, and
+SID-distribution entropy.
+
+```text
+full SID-space utilization = effective_cluster_count / (K1 * K2 * K3)
+```
 
 ## Train
 

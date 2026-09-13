@@ -13,40 +13,12 @@ embeddings="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/
 item_ids="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_ids.npy"
 require_unique=false
 
-# Select one experiment preset.
-preset="${preset:-512-512-512-cosine}"
-case "${preset}" in
-  "256-256-256-euclidean")
-    codebook_sizes=(256 256 256)
-    distance_metric="euclidean"
-    ;;
-  "256-256-256-cosine")
-    codebook_sizes=(256 256 256)
-    distance_metric="cosine"
-    ;;
-  "512-512-512-cosine")
-    codebook_sizes=(512 512 512)
-    distance_metric="cosine"
-    ;;
-  "256-512-1024-cosine")
-    codebook_sizes=(256 512 1024)
-    distance_metric="cosine"
-    ;;
-  "1024-512-256-euclidean")
-    codebook_sizes=(1024 512 256)
-    distance_metric="euclidean"
-    ;;
-  "1024-512-256-cosine")
-    codebook_sizes=(1024 512 256)
-    distance_metric="cosine"
-    ;;
-  *)
-    echo "unknown SID preset: ${preset}" >&2
-    exit 2
-    ;;
-esac
+# SID experiment parameters.
+codebook_sizes=(512 512 512)
+distance_metric="cosine"  # euclidean | cosine
 
-output_dir="lazy_onerec/output/kuairand_sid/${method}-${preset}"
+codebook_tag="$(IFS=-; echo "${codebook_sizes[*]}")"
+output_dir="lazy_onerec/output/kuairand_sid/${method}-${codebook_tag}-${distance_metric}"
 
 # K-means parameters.
 max_iter=100

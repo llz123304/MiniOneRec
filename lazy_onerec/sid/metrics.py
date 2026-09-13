@@ -78,6 +78,7 @@ def evaluate_final_sid_clusters(
         progress.set_postfix_str("computing cluster statistics")
         n_items = int(len(values))
         n_clusters = int(len(cluster_sizes))
+        full_sid_space_size = math.prod(sizes)
         singleton_clusters = int(np.count_nonzero(cluster_sizes == 1))
         probabilities = cluster_sizes.astype(np.float64) / n_items
         entropy = float(
@@ -102,6 +103,10 @@ def evaluate_final_sid_clusters(
         "num_items": n_items,
         "num_clusters": n_clusters,
         "effective_cluster_count": n_clusters,
+        "full_sid_space_size": full_sid_space_size,
+        "full_sid_space_utilization": float(
+            n_clusters / full_sid_space_size
+        ),
         "collision_count": int(n_items - n_clusters),
         "collision_rate": float(1.0 - n_clusters / n_items),
         "singleton_cluster_count": singleton_clusters,
@@ -137,6 +142,7 @@ def print_sid_metrics(metrics: Dict[str, Any]) -> None:
     print(
         "[sid-metrics] "
         f"clusters={metrics['num_clusters']} "
+        f"space_utilization={metrics['full_sid_space_utilization']:.6f} "
         f"collision_rate={metrics['collision_rate']:.6f} "
         f"singleton_ratio={metrics['singleton_cluster_ratio']:.6f} "
         f"entropy={metrics['sid_distribution_entropy_nats']:.6f} "

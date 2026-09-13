@@ -98,22 +98,12 @@ overwrite=true
 
 ```bash
 method="rq-kmeans"
-preset="512-512-512-cosine"
+codebook_sizes=(512 512 512)
+distance_metric="cosine"  # euclidean | cosine
 ```
 
 `method` 支持 `rq-kmeans`、`constrained-rq-kmeans`、`rq-vae` 和
 `rq-kmeans-plus`。
-
-`preset` 支持：
-
-```text
-256-256-256-euclidean
-256-256-256-cosine
-512-512-512-cosine
-256-512-1024-cosine
-1024-512-256-euclidean
-1024-512-256-cosine
-```
 
 `rq-kmeans` 支持每层使用不同的 2 的幂码本，例如 `256-512-1024`
 对应 `nbits=[8,9,10]`。余弦模式会归一化输入，并在神经量化器中使用
@@ -130,15 +120,19 @@ lazy_onerec/scripts/build_sid.sh
 输出：
 
 ```text
-lazy_onerec/output/kuairand_sid/<method>-<preset>/
+lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 ├── sid_index.json
 ├── codes.npy
 ├── codebooks.npz
 └── sid_metrics.json
 ```
 
-`sid_metrics.json` 包含碰撞率、孤点簇占比、最大/平均簇大小、
-P50/P90/P95/P99 和 SID 分布熵。
+`sid_metrics.json` 包含完整 SID 空间利用率、碰撞率、孤点簇占比、
+最大/平均簇大小、P50/P90/P95/P99 和 SID 分布熵。
+
+```text
+完整 SID 空间利用率 = effective_cluster_count / (K1 × K2 × K3)
+```
 
 ## 训练
 

@@ -74,6 +74,8 @@ def _save_outputs(
         for key in (
             "num_items",
             "effective_cluster_count",
+            "full_sid_space_size",
+            "full_sid_space_utilization",
             "collision_count",
             "collision_rate",
         )
