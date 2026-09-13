@@ -10,6 +10,7 @@ import numpy as np
 
 from .artifact import SemanticIDArtifact
 from .constrained_rq_kmeans import residual_kmeans
+from .distance import prepare_numpy_values, validate_distance_metric
 from .faiss_rq_kmeans import faiss_residual_kmeans
 from .metrics import (
     evaluate_final_sid_clusters,
@@ -59,6 +60,9 @@ def _save_outputs(
     require_unique: bool,
 ) -> SemanticIDArtifact:
     metrics = evaluate_final_sid_clusters(codes, codebook_sizes)
+    metrics["method"] = metadata["method"]
+    metrics["distance_metric"] = metadata["distance_metric"]
+    metrics["codebook_sizes"] = [int(size) for size in codebook_sizes]
     if require_unique and metrics["collision_count"]:
         raise ValueError(
             f"artifact contains {metrics['collision_count']} collided items"
@@ -102,12 +106,19 @@ def build_rq_kmeans(
     codebook_sizes: Sequence[int],
     item_ids_path: str | None = None,
     beam_size: int = 1,
+    distance_metric: str = "euclidean",
     require_unique: bool = False,
 ) -> SemanticIDArtifact:
-    embeddings = load_embeddings(embeddings_path)
+    distance_metric = validate_distance_metric(distance_metric)
+    embeddings = prepare_numpy_values(
+        load_embeddings(embeddings_path), distance_metric, copy=False
+    )
     item_ids = load_item_ids(item_ids_path, len(embeddings))
     codes, codebooks, _ = faiss_residual_kmeans(
-        embeddings, codebook_sizes, beam_size=beam_size
+        embeddings,
+        codebook_sizes,
+        beam_size=beam_size,
+        distance_metric=distance_metric,
     )
     return _save_outputs(
         output_dir,
@@ -120,6 +131,7 @@ def build_rq_kmeans(
             "embeddings_path": embeddings_path,
             "embedding_dim": int(embeddings.shape[1]),
             "beam_size": beam_size,
+            "distance_metric": distance_metric,
         },
         require_unique,
     )
@@ -132,15 +144,20 @@ def build_constrained_rq_kmeans(
     item_ids_path: str | None = None,
     max_iter: int = 100,
     seed: int = 42,
+    distance_metric: str = "euclidean",
     require_unique: bool = False,
 ) -> SemanticIDArtifact:
-    embeddings = load_embeddings(embeddings_path)
+    distance_metric = validate_distance_metric(distance_metric)
+    embeddings = prepare_numpy_values(
+        load_embeddings(embeddings_path), distance_metric, copy=False
+    )
     item_ids = load_item_ids(item_ids_path, len(embeddings))
     codes, codebooks, reconstruction = residual_kmeans(
         embeddings,
         codebook_sizes,
         max_iter=max_iter,
         seed=seed,
+        distance_metric=distance_metric,
     )
     return _save_outputs(
         output_dir,
@@ -154,6 +171,7 @@ def build_constrained_rq_kmeans(
             "embedding_dim": int(embeddings.shape[1]),
             "seed": seed,
             "max_iter": max_iter,
+            "distance_metric": distance_metric,
             "reconstruction_mse": float(
                 np.mean((embeddings - reconstruction) ** 2)
             ),
@@ -183,10 +201,14 @@ def _build_neural(
     sinkhorn_iters: int,
     eval_every: int,
     seed: int,
+    distance_metric: str,
     require_unique: bool,
 ) -> SemanticIDArtifact:
     torch = __import__("torch")
-    embeddings = load_embeddings(embeddings_path)
+    distance_metric = validate_distance_metric(distance_metric)
+    embeddings = prepare_numpy_values(
+        load_embeddings(embeddings_path), distance_metric, copy=False
+    )
     item_ids = load_item_ids(item_ids_path, len(embeddings))
     rqvae_class = build_rqvae_class()
 
@@ -197,6 +219,7 @@ def _build_neural(
             codebook_sizes,
             max_iter=kmeans_iters,
             seed=seed,
+            distance_metric=distance_metric,
         )
         del initial_codes
         kmeans_init = False
@@ -214,6 +237,7 @@ def _build_neural(
         kmeans_iters=kmeans_iters,
         sinkhorn_epsilons=sinkhorn_epsilons,
         sinkhorn_iters=sinkhorn_iters,
+        distance_metric=distance_metric,
     )
     if initial_codebooks is not None:
         make_rq_kmeans_plus(model, initial_codebooks)
@@ -250,6 +274,7 @@ def _build_neural(
             "learning_rate": learning_rate,
             "best_loss": result.best_loss,
             "best_collision_rate": result.collision_rate,
+            "distance_metric": distance_metric,
             "seed": seed,
         },
         require_unique,
@@ -263,6 +288,7 @@ def _build_neural(
             "latent_dim": latent_dim,
             "hidden_dims": list(hidden_dims),
             "codebook_sizes": list(codebook_sizes),
+            "distance_metric": distance_metric,
         },
         output / "model.pt",
     )

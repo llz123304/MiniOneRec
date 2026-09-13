@@ -10,6 +10,7 @@ from .builders import (
     build_rq_kmeans_plus,
     build_rq_vae,
 )
+from .distance import DISTANCE_METRICS
 
 
 METHODS = (
@@ -28,6 +29,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--codebook-sizes", type=int, nargs="+", default=[256, 256, 256]
+    )
+    parser.add_argument(
+        "--distance-metric",
+        choices=DISTANCE_METRICS,
+        default="euclidean",
     )
     parser.add_argument("--require-unique", action="store_true")
 
@@ -64,6 +70,7 @@ def main() -> None:
         embeddings_path=args.embeddings,
         output_dir=args.output_dir,
         codebook_sizes=args.codebook_sizes,
+        distance_metric=args.distance_metric,
         item_ids_path=args.item_ids,
         require_unique=args.require_unique,
     )

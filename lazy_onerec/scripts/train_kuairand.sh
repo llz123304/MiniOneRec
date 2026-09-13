@@ -9,7 +9,7 @@ python_bin="${python_bin:-python3}"
 gpu_id=0  # Physical GPU index from nvidia-smi.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 data_root="lazy_onerec/KuaiRand-1K"
-sid_artifact="lazy_onerec/output/kuairand_sid/sid_index.json"
+sid_artifact="lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json"
 output_dir="lazy_onerec/output/kuairand_model"
 
 # Dataset parameters.

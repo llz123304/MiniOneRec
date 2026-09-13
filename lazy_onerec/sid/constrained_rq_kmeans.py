@@ -11,6 +11,12 @@ from typing import List, Sequence, Tuple
 import numpy as np
 from tqdm.auto import tqdm
 
+from .distance import (
+    normalize_numpy_rows,
+    prepare_numpy_values,
+    validate_distance_metric,
+)
+
 
 def balanced_kmeans(
     values: np.ndarray,
@@ -18,6 +24,7 @@ def balanced_kmeans(
     max_iter: int = 100,
     tol: float = 1e-7,
     random_state: int | None = None,
+    distance_metric: str = "euclidean",
 ) -> Tuple[np.ndarray, np.ndarray]:
     try:
         from k_means_constrained import KMeansConstrained
@@ -27,7 +34,9 @@ def balanced_kmeans(
             "pip install k-means-constrained"
         ) from exc
 
-    n_items = values.shape[0]
+    metric = validate_distance_metric(distance_metric)
+    fit_values = prepare_numpy_values(values, metric)
+    n_items = fit_values.shape[0]
     min_size = max(1, n_items // n_clusters - 1)
     max_size = n_items // n_clusters + 1
     model = KMeansConstrained(
@@ -40,8 +49,11 @@ def balanced_kmeans(
         n_init=3,
         n_jobs=16,
     )
-    labels = model.fit_predict(values.astype(np.float32, copy=False))
-    return labels.astype(np.int32), model.cluster_centers_.astype(np.float32)
+    labels = model.fit_predict(fit_values)
+    centers = model.cluster_centers_.astype(np.float32)
+    if metric == "cosine":
+        centers = normalize_numpy_rows(centers)
+    return labels.astype(np.int32), centers
 
 
 def residual_kmeans(
@@ -50,9 +62,11 @@ def residual_kmeans(
     max_iter: int = 100,
     tol: float = 1e-7,
     seed: int = 42,
+    distance_metric: str = "euclidean",
 ) -> Tuple[np.ndarray, List[np.ndarray], np.ndarray]:
     """Return ``codes [N,L]``, codebooks, and reconstructed embeddings."""
     values = embeddings.astype(np.float32, copy=False)
+    metric = validate_distance_metric(distance_metric)
     residual = values.copy()
     codes = np.empty((values.shape[0], len(codebook_sizes)), dtype=np.int32)
     codebooks: List[np.ndarray] = []
@@ -73,6 +87,7 @@ def residual_kmeans(
             max_iter=max_iter,
             tol=tol,
             random_state=level_seed,
+            distance_metric=metric,
         )
         codes[:, level] = level_codes
         codebooks.append(centroids)

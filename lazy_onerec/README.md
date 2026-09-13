@@ -97,12 +97,30 @@ overwrite=true
 Set these values in `build_sid.sh`:
 
 ```bash
-method="constrained-rq-kmeans"
-codebook_sizes=(256 256 256)
+method="rq-kmeans"
+preset="512-512-512-cosine"
 ```
 
 `method` supports `rq-kmeans`, `constrained-rq-kmeans`, `rq-vae`, and
 `rq-kmeans-plus`.
+
+Available presets:
+
+```text
+256-256-256-euclidean
+256-256-256-cosine
+512-512-512-cosine
+256-512-1024-cosine
+1024-512-256-euclidean
+1024-512-256-cosine
+```
+
+`rq-kmeans` requires equal sizes at all levels; use another method for
+asymmetric presets. Cosine mode normalizes inputs and uses cosine assignment
+in neural quantizers.
+With pre-normalized embeddings, FAISS `rq-kmeans` may produce identical
+Euclidean and cosine results; use constrained or neural methods for that
+distance comparison.
 
 Run:
 
@@ -113,7 +131,7 @@ lazy_onerec/scripts/build_sid.sh
 Output:
 
 ```text
-lazy_onerec/output/kuairand_sid/
+lazy_onerec/output/kuairand_sid/<method>-<preset>/
 ├── sid_index.json
 ├── codes.npy
 ├── codebooks.npz

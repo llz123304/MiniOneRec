@@ -10,6 +10,8 @@ from typing import Dict, List, Sequence, Tuple
 import numpy as np
 from tqdm.auto import tqdm
 
+from .distance import validate_distance_metric
+
 
 def _torch():
     try:
@@ -19,16 +21,28 @@ def _torch():
     return torch
 
 
-def _kmeans_centers(values, n_clusters: int, n_iters: int):
+def _kmeans_centers(
+    values,
+    n_clusters: int,
+    n_iters: int,
+    distance_metric: str,
+):
+    torch = _torch()
     from sklearn.cluster import KMeans
 
+    fit_values = values
+    if distance_metric == "cosine":
+        fit_values = torch.nn.functional.normalize(values, dim=-1)
     centers = KMeans(
         n_clusters=n_clusters,
         max_iter=n_iters,
         n_init=10,
         random_state=42,
-    ).fit(values.detach().cpu().numpy()).cluster_centers_
-    return values.new_tensor(centers)
+    ).fit(fit_values.detach().cpu().numpy()).cluster_centers_
+    result = values.new_tensor(centers)
+    if distance_metric == "cosine":
+        result = torch.nn.functional.normalize(result, dim=-1)
+    return result
 
 
 def _sinkhorn(distances, epsilon: float, iterations: int):
@@ -80,6 +94,7 @@ def build_rqvae_class():
             kmeans_iters: int,
             sinkhorn_epsilon: float,
             sinkhorn_iters: int,
+            distance_metric: str,
         ):
             super().__init__()
             self.n_codes = n_codes
@@ -88,6 +103,7 @@ def build_rqvae_class():
             self.kmeans_iters = kmeans_iters
             self.sinkhorn_epsilon = sinkhorn_epsilon
             self.sinkhorn_iters = sinkhorn_iters
+            self.distance_metric = validate_distance_metric(distance_metric)
             self.embedding = nn.Embedding(n_codes, dim)
             self.register_buffer(
                 "initialized", torch.tensor(not kmeans_init, dtype=torch.bool)
@@ -107,16 +123,26 @@ def build_rqvae_class():
                         "first RQ-VAE batch must contain at least codebook_size rows"
                     )
                 centers = _kmeans_centers(
-                    flat, self.n_codes, self.kmeans_iters
+                    flat,
+                    self.n_codes,
+                    self.kmeans_iters,
+                    self.distance_metric,
                 )
                 self.embedding.weight.data.copy_(centers)
                 self.initialized.fill_(True)
 
-            distances = (
-                flat.square().sum(dim=1, keepdim=True)
-                + self.embedding.weight.square().sum(dim=1).unsqueeze(0)
-                - 2 * flat @ self.embedding.weight.t()
-            )
+            if self.distance_metric == "cosine":
+                normalized_values = functional.normalize(flat, dim=-1)
+                normalized_codes = functional.normalize(
+                    self.embedding.weight, dim=-1
+                )
+                distances = 1.0 - normalized_values @ normalized_codes.t()
+            else:
+                distances = (
+                    flat.square().sum(dim=1, keepdim=True)
+                    + self.embedding.weight.square().sum(dim=1).unsqueeze(0)
+                    - 2 * flat @ self.embedding.weight.t()
+                )
             if use_sinkhorn and self.sinkhorn_epsilon > 0:
                 centered = distances - distances.mean()
                 scale = centered.abs().max().clamp_min(1e-5)
@@ -145,6 +171,7 @@ def build_rqvae_class():
             kmeans_iters,
             sinkhorn_epsilons,
             sinkhorn_iters,
+            distance_metric,
         ):
             super().__init__()
             self.layers = nn.ModuleList(
@@ -157,6 +184,7 @@ def build_rqvae_class():
                         kmeans_iters,
                         epsilon,
                         sinkhorn_iters,
+                        distance_metric,
                     )
                     for size, epsilon in zip(
                         codebook_sizes, sinkhorn_epsilons
@@ -197,6 +225,7 @@ def build_rqvae_class():
             kmeans_iters: int = 100,
             sinkhorn_epsilons: Sequence[float] | None = None,
             sinkhorn_iters: int = 50,
+            distance_metric: str = "euclidean",
         ):
             super().__init__()
             self.input_dim = input_dim
@@ -220,6 +249,7 @@ def build_rqvae_class():
                 kmeans_iters,
                 sinkhorn_epsilons,
                 sinkhorn_iters,
+                distance_metric,
             )
             self.decoder = MLPLayers.build(decoder_dims, dropout, bn)
 

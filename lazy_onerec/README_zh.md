@@ -97,12 +97,28 @@ overwrite=true
 在 `build_sid.sh` 中设置：
 
 ```bash
-method="constrained-rq-kmeans"
-codebook_sizes=(256 256 256)
+method="rq-kmeans"
+preset="512-512-512-cosine"
 ```
 
 `method` 支持 `rq-kmeans`、`constrained-rq-kmeans`、`rq-vae` 和
 `rq-kmeans-plus`。
+
+`preset` 支持：
+
+```text
+256-256-256-euclidean
+256-256-256-cosine
+512-512-512-cosine
+256-512-1024-cosine
+1024-512-256-euclidean
+1024-512-256-cosine
+```
+
+`rq-kmeans` 仅支持三层相同大小；非对称码本使用其他方法。余弦模式会
+归一化输入，并在神经量化器中使用余弦距离。
+当 embedding 已经 L2 归一化时，FAISS `rq-kmeans` 的欧氏与余弦结果
+可能相同；距离对比优先使用 constrained 或神经方法。
 
 执行：
 
@@ -113,7 +129,7 @@ lazy_onerec/scripts/build_sid.sh
 输出：
 
 ```text
-lazy_onerec/output/kuairand_sid/
+lazy_onerec/output/kuairand_sid/<method>-<preset>/
 ├── sid_index.json
 ├── codes.npy
 ├── codebooks.npz

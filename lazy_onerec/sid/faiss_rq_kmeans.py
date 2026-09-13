@@ -7,6 +7,8 @@ from typing import List, Sequence, Tuple
 import numpy as np
 from tqdm.auto import tqdm
 
+from .distance import prepare_numpy_values, validate_distance_metric
+
 
 def _validate_sizes(codebook_sizes: Sequence[int]) -> int:
     sizes = [int(size) for size in codebook_sizes]
@@ -52,6 +54,7 @@ def faiss_residual_kmeans(
     embeddings: np.ndarray,
     codebook_sizes: Sequence[int],
     beam_size: int = 1,
+    distance_metric: str = "euclidean",
 ) -> Tuple[np.ndarray, List[np.ndarray], object]:
     """Return raw codes, codebooks, and the trained FAISS quantizer."""
     try:
@@ -61,8 +64,11 @@ def faiss_residual_kmeans(
             "Install faiss-cpu or faiss-gpu to use RQ-Kmeans"
         ) from exc
 
+    metric = validate_distance_metric(distance_metric)
     size = _validate_sizes(codebook_sizes)
-    values = np.ascontiguousarray(embeddings.astype(np.float32, copy=False))
+    values = np.ascontiguousarray(
+        prepare_numpy_values(embeddings, metric, copy=False)
+    )
     nbits = int(np.log2(size))
     quantizer = faiss.ResidualQuantizer(
         values.shape[1], len(codebook_sizes), nbits
