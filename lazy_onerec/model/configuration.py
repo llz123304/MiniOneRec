@@ -24,12 +24,12 @@ class LazyOneRecConfig(PretrainedConfig):
         self,
         vocab_size: int = None,           # derived from special tokens + codebooks
         codebook_sizes: list = None,      # per-level K, e.g. [256,256,256] (must match SID generation)
-        d_model: int = 768,
+        d_model: int = 256,
         n_layers: int = 6,
-        n_heads: int = 12,                # query heads (self-attention)
+        n_heads: int = 4,                 # query heads (self-attention)
         n_kv_heads: int = 2,              # GQA: key/value head groups (< n_heads)
         n_context_layers: int = 2,        # depth of the (lazy) context encoder; 0 = pure projection
-        d_ff: int = 3072,
+        d_ff: int = 1024,
         max_target_len: int = 4,          # BOS + 3-level codebook SID
         max_context_len: int = 3000,      # OneRec-V2 scales context up to ~3000
         # --- Lazy cross-attention knobs ---

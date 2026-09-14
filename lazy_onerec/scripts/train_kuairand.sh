@@ -15,14 +15,32 @@ output_dir="lazy_onerec/output/kuairand_model"
 # Dataset parameters.
 sample=-1  # -1 uses all training samples.
 min_history=3
-max_history=128
+click_history_length=128
+long_view_history_length=128  # Also used by long-view duration.
+like_history_length=64
+deep_interact_history_length=32
+hate_history_length=16
+warmup_days=3  # First days used as history only, no samples.
+test_days=3    # Last days form the test split; middle days train.
 
 # Model parameters. Codebook sizes come from sid_artifact.
-d_model=768
-gid_dim=128
+d_model=256
+d_ff=1024
+gid_dim=64
+user_id_dim=128
+categorical_dim=8
+continuous_dim=16
+duration_dim=8
+qformer_layers=1
+click_query_tokens=16
+long_view_query_tokens=16
+long_view_duration_query_tokens=16
+like_query_tokens=8
+deep_interact_query_tokens=4
+hate_query_tokens=2
 n_layers=6
 n_context_layers=2
-n_heads=12
+n_heads=4
 n_kv_heads=2
 kv_sharing=true
 kv_share_every=2
@@ -44,9 +62,27 @@ args=(
   --output-dir "${output_dir}"
   --sample "${sample}"
   --min-history "${min_history}"
-  --max-history "${max_history}"
+  --click-history-length "${click_history_length}"
+  --long-view-history-length "${long_view_history_length}"
+  --like-history-length "${like_history_length}"
+  --deep-interact-history-length "${deep_interact_history_length}"
+  --hate-history-length "${hate_history_length}"
+  --warmup-days "${warmup_days}"
+  --test-days "${test_days}"
   --d-model "${d_model}"
+  --d-ff "${d_ff}"
   --gid-dim "${gid_dim}"
+  --user-id-dim "${user_id_dim}"
+  --categorical-dim "${categorical_dim}"
+  --continuous-dim "${continuous_dim}"
+  --duration-dim "${duration_dim}"
+  --qformer-layers "${qformer_layers}"
+  --click-query-tokens "${click_query_tokens}"
+  --long-view-query-tokens "${long_view_query_tokens}"
+  --long-view-duration-query-tokens "${long_view_duration_query_tokens}"
+  --like-query-tokens "${like_query_tokens}"
+  --deep-interact-query-tokens "${deep_interact_query_tokens}"
+  --hate-query-tokens "${hate_query_tokens}"
   --n-layers "${n_layers}"
   --n-context-layers "${n_context_layers}"
   --n-heads "${n_heads}"

@@ -13,6 +13,12 @@ from ..data.kuairand import (
     KuaiRandNextExposureSidDataset,
     build_exposure_sample_indices,
 )
+from ..data.schema import (
+    DEFAULT_GID_SEQUENCE_LENGTHS,
+    DEFAULT_QFORMER_QUERY_COUNTS,
+    raw_context_length,
+    total_context_length,
+)
 from ..data.day_batch_sampler import DayBatchSampler
 from ..model import LazyOneRecConfig, KuaiRandLazyOneRecForCausalLM
 from ..sid.artifact import SemanticIDArtifact
@@ -82,12 +88,74 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--sample", type=int, default=-1)
     parser.add_argument("--min-history", type=int, default=3)
-    parser.add_argument("--max-history", type=int, default=128)
-    parser.add_argument("--d-model", type=int, default=768)
-    parser.add_argument("--gid-dim", type=int, default=128)
+    parser.add_argument(
+        "--click-history-length",
+        type=int,
+        default=DEFAULT_GID_SEQUENCE_LENGTHS["click"],
+    )
+    parser.add_argument(
+        "--long-view-history-length",
+        type=int,
+        default=DEFAULT_GID_SEQUENCE_LENGTHS["long_view"],
+    )
+    parser.add_argument(
+        "--like-history-length",
+        type=int,
+        default=DEFAULT_GID_SEQUENCE_LENGTHS["like"],
+    )
+    parser.add_argument(
+        "--deep-interact-history-length",
+        type=int,
+        default=DEFAULT_GID_SEQUENCE_LENGTHS["deep_interact"],
+    )
+    parser.add_argument(
+        "--hate-history-length",
+        type=int,
+        default=DEFAULT_GID_SEQUENCE_LENGTHS["hate"],
+    )
+    parser.add_argument("--warmup-days", type=int, default=3)
+    parser.add_argument("--test-days", type=int, default=3)
+    parser.add_argument("--d-model", type=int, default=256)
+    parser.add_argument("--d-ff", type=int, default=1024)
+    parser.add_argument("--gid-dim", type=int, default=64)
+    parser.add_argument("--user-id-dim", type=int, default=128)
+    parser.add_argument("--categorical-dim", type=int, default=8)
+    parser.add_argument("--continuous-dim", type=int, default=16)
+    parser.add_argument("--duration-dim", type=int, default=8)
+    parser.add_argument("--qformer-layers", type=int, default=1)
+    parser.add_argument(
+        "--click-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["click"],
+    )
+    parser.add_argument(
+        "--long-view-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["long_view"],
+    )
+    parser.add_argument(
+        "--long-view-duration-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["long_view_duration"],
+    )
+    parser.add_argument(
+        "--like-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["like"],
+    )
+    parser.add_argument(
+        "--deep-interact-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["deep_interact"],
+    )
+    parser.add_argument(
+        "--hate-query-tokens",
+        type=int,
+        default=DEFAULT_QFORMER_QUERY_COUNTS["hate"],
+    )
     parser.add_argument("--n-layers", type=int, default=6)
     parser.add_argument("--n-context-layers", type=int, default=2)
-    parser.add_argument("--n-heads", type=int, default=12)
+    parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--n-kv-heads", type=int, default=2)
     parser.add_argument(
         "--kv-sharing",
@@ -115,21 +183,38 @@ def main() -> None:
 
     artifact = SemanticIDArtifact.load(args.sid_artifact)
     corpus = KuaiRandExposureCorpus(args.data_root)
+    history_lengths = {
+        "click": args.click_history_length,
+        "long_view": args.long_view_history_length,
+        "like": args.like_history_length,
+        "deep_interact": args.deep_interact_history_length,
+        "hate": args.hate_history_length,
+    }
+    qformer_query_counts = {
+        "click": args.click_query_tokens,
+        "long_view": args.long_view_query_tokens,
+        "long_view_duration": args.long_view_duration_query_tokens,
+        "like": args.like_query_tokens,
+        "deep_interact": args.deep_interact_query_tokens,
+        "hate": args.hate_query_tokens,
+    }
     sample_indices = build_exposure_sample_indices(
         corpus=corpus,
         sid_artifact=artifact,
         min_history=args.min_history,
+        warmup_days=args.warmup_days,
+        test_days=args.test_days,
     )
     datasets = {
         split: KuaiRandNextExposureSidDataset(
             corpus=corpus,
             sid_artifact=artifact,
             sample_index=sample_indices[split],
-            max_history=args.max_history,
+            history_lengths=history_lengths,
             sample=args.sample if split == "train" else -1,
             seed=args.seed,
         )
-        for split in ("train", "valid", "test")
+        for split in ("train", "test")
     }
     if not datasets["train"]:
         raise ValueError(
@@ -139,12 +224,17 @@ def main() -> None:
     print(
         f"[data] users={len(corpus.sequences)} "
         f"gid_vocab={corpus.num_gid_embeddings} "
-        f"train={len(datasets['train'])} "
-        f"valid={len(datasets['valid'])} test={len(datasets['test'])}"
+        f"warmup_days={args.warmup_days} test_days={args.test_days} "
+        f"train={len(datasets['train'])} test={len(datasets['test'])}"
     )
     print(
         f"[user] categorical={corpus.user_features.categorical.shape[1]} "
         f"continuous={corpus.user_features.continuous.shape[1]}"
+    )
+    print(
+        f"[context] raw={raw_context_length(history_lengths)} "
+        f"compressed={total_context_length(history_lengths, qformer_query_counts)} "
+        f"qformer_queries={qformer_query_counts}"
     )
     print(
         f"[sid] items={artifact.n_items} "
@@ -155,19 +245,33 @@ def main() -> None:
     config = LazyOneRecConfig.from_codebook_sizes(
         artifact.codebook_sizes,
         d_model=args.d_model,
+        d_ff=args.d_ff,
         n_layers=args.n_layers,
         n_context_layers=args.n_context_layers,
         n_heads=args.n_heads,
         n_kv_heads=args.n_kv_heads,
         kv_sharing=args.kv_sharing,
         kv_share_every=args.kv_share_every,
-        max_context_len=args.max_history,
+        max_context_len=total_context_length(
+            history_lengths,
+            qformer_query_counts,
+        ),
         position_encoding=args.position_encoding,
     )
     model = KuaiRandLazyOneRecForCausalLM(
         config,
         num_gid_embeddings=corpus.num_gid_embeddings,
+        user_categorical_cardinalities=(
+            corpus.user_features.categorical_cardinalities
+        ),
         gid_dim=args.gid_dim,
+        user_id_dim=args.user_id_dim,
+        categorical_dim=args.categorical_dim,
+        continuous_dim=args.continuous_dim,
+        duration_dim=args.duration_dim,
+        history_lengths=history_lengths,
+        qformer_query_counts=qformer_query_counts,
+        qformer_layers=args.qformer_layers,
     )
     n_params = sum(parameter.numel() for parameter in model.parameters())
     print(f"[model] params={n_params:,}")
@@ -193,7 +297,7 @@ def main() -> None:
         logging_steps=args.logging_steps,
         bf16=args.bf16,
         save_strategy="epoch",
-        eval_strategy="epoch",
+        eval_strategy="no",
         report_to=[],
         remove_unused_columns=False,
         accelerator_config={"even_batches": False},
@@ -202,8 +306,7 @@ def main() -> None:
         model=model,
         args=training_args,
         train_dataset=datasets["train"],
-        eval_dataset=datasets["valid"],
-        data_collator=KuaiRandCollator(),
+        data_collator=KuaiRandCollator(history_lengths=history_lengths),
     )
     trainer.train()
     trainer.save_model(args.output_dir)

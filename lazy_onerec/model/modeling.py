@@ -168,10 +168,9 @@ class ContextProcessor(nn.Module):
     Heterogeneous adapters may provide ``context_inputs_embeds`` directly.
     """
 
-    def __init__(self, config: LazyOneRecConfig, embed_tokens: "SidEmbedding"):
+    def __init__(self, config: LazyOneRecConfig):
         super().__init__()
         self.config = config
-        self.embed_tokens = embed_tokens  # shared with decoder input embeddings
         # Learned absolute position embedding (only when position_encoding="learned"),
         # added once before the encoder -- matches sentiment/models tokenizer.py.
         self.use_learned_pe = config.position_encoding == "learned"
@@ -193,20 +192,11 @@ class ContextProcessor(nn.Module):
 
     def forward(
         self,
-        context_input_ids=None,
-        context_inputs_embeds=None,
+        context_inputs_embeds,
         context_attention_mask=None,
     ):
         cfg = self.config
-        if (context_input_ids is None) == (context_inputs_embeds is None):
-            raise ValueError(
-                "provide exactly one of context_input_ids or context_inputs_embeds"
-            )
-        h = (
-            self.embed_tokens(context_input_ids)
-            if context_inputs_embeds is None
-            else context_inputs_embeds
-        )
+        h = context_inputs_embeds
         cos = sin = None
         if self.use_learned_pe:
             h = h + self.pos_emb[: h.size(1)].unsqueeze(0)  # learned absolute PE
@@ -323,7 +313,7 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         # Per-level input embedding (independent table per codebook level), shared
         # between the context encoder and the decoder input side.
         self.embed_tokens = SidEmbedding(config)
-        self.context_processor = ContextProcessor(config, self.embed_tokens)
+        self.context_processor = ContextProcessor(config)
         # Decoder target position encoding: learned absolute PE when configured;
         # otherwise RoPE is applied inside SelfAttention.
         self.use_learned_pe = config.position_encoding == "learned"
@@ -370,8 +360,14 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
     ):
         # 1) Encode context ONCE (skip if already cached during generation).
         if context_kv_blocks is None:
+            if (context_input_ids is None) == (context_inputs_embeds is None):
+                raise ValueError(
+                    "provide exactly one of context_input_ids or "
+                    "context_inputs_embeds"
+                )
+            if context_inputs_embeds is None:
+                context_inputs_embeds = self.embed_tokens(context_input_ids)
             context_kv_blocks, context_attention_mask = self.context_processor(
-                context_input_ids=context_input_ids,
                 context_inputs_embeds=context_inputs_embeds,
                 context_attention_mask=context_attention_mask,
             )

@@ -1,3 +1,7 @@
 data/KuaiRand/
 lazy_onerec/KuaiRand-1K/
 lazy_onerec/output/
+.venv/
+__pycache__/
+*.py[cod]
+*.profraw

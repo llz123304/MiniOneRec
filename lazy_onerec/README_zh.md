@@ -131,16 +131,38 @@ lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 
 在 `train_kuairand.sh` 中设置模型与训练参数。支持 BF16 时设置
 `bf16=true`。两个标准推荐日志中的每条曝光都作为目标 SID 样本，
-历史为目标时间之前最多 128 条曝光，并保留点击和互动反馈。随机曝光
-日志不参与训练。该目标将标准曝光视为弱正反馈，学习线上推荐策略的
-曝光分布。
+随机曝光日志不参与训练。该目标将标准曝光视为弱正反馈，学习线上
+推荐策略的曝光分布。
+
+历史严格使用 `time_ms < target_time` 的行为，并独立构建 6 条序列：
+click GID 128、long-view GID 128、long-view duration 128、like GID
+64、deep-interaction GID 32 和 hate GID 16，共 496 个行为位置。
+deep interaction 合并 follow、comment 和 forward。long-view duration
+与 long-view GID 使用相同事件和 mask，但分别生成 token；其时长桶为：
+
+```text
+min(round(sqrt(duration_ms / 1000)), 99)
+```
 
 `user_features_1k.csv` 在启动时读取一次。每条样本通过 `user_id`
 引用 26 个类别特征和 4 个经过 `log1p` 标准化的连续特征。
-每条目标曝光还包含 4 个请求类别特征：`tab`、小时、星期和距上次
-曝光的时间间隔桶。
+User ID 使用 128 维 embedding，其余类别特征统一使用 8 维。每条
+目标曝光还包含 4 个请求类别特征：`tab`、小时、星期和距上次曝光的
+时间间隔桶。User 与 Request 特征全部拼接后，统一投影为两个 256 维
+token。与未压缩的行为序列拼接后，原始 Context 长度为 498。
 
-训练日期固定升序，每天内部随机组 batch，单个 batch 不会跨日期。
+每条行为序列分别使用一套独立的一层 Q-Former、learnable query 和
+序列内部位置 embedding，不共享 Q-Former 参数。默认 query 数依次为：
+click 16、long-view GID 16、long-view duration 16、like 8、deep
+interaction 4、hate 2。压缩后得到 62 个行为 token，加上两个
+User/Request token，Context Encoder 的实际输入长度为 64。
+
+默认主干宽度为 256，使用 4 个 attention heads 和 1024 维 FFN。
+五条 GID 序列共享 64 维 GID embedding，long-view duration 使用
+8 维 embedding，之后分别投影到主干宽度。
+
+前 3 天仅构建历史，中间日期训练，最后 3 天测试。训练日期固定升序，
+每天内部随机组 batch，单个 batch 不会跨日期。
 每天不足 `micro_batch_size` 的尾部仍作为小 batch 训练，因此梯度累积
 可能跨越相邻日期。
 

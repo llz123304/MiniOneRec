@@ -134,19 +134,45 @@ full SID-space utilization = effective_cluster_count / (K1 * K2 * K3)
 
 Set model and optimization parameters in `train_kuairand.sh`. Set `bf16=true`
 when BF16 is supported. Every exposure in the two standard recommendation logs
-is a target SID sample. Its context contains up to 128 preceding exposures with
-their click and interaction feedback. The random-exposure log is not used. This
-treats standard exposure as weak positive feedback and imitates the logging
-policy's exposure distribution.
+is a target SID sample. The random-exposure log is not used. This treats
+standard exposure as weak positive feedback and imitates the logging policy's
+exposure distribution.
+
+History strictly uses events with `time_ms < target_time` and forms six
+independent sequences: click GID 128, long-view GID 128, long-view duration
+128, like GID 64, deep-interaction GID 32, and hate GID 16, for 496 behavior
+positions. Deep interaction merges follow, comment, and forward. Long-view
+duration uses the same events and mask as long-view GID but produces separate
+tokens. Its bucket is:
+
+```text
+min(round(sqrt(duration_ms / 1000)), 99)
+```
 
 `user_features_1k.csv` is loaded once at startup. Each sample references 26
 categorical features and four `log1p`-standardized continuous features by
-`user_id`.
-Each target exposure also carries four categorical request features: tab,
-hour, day of week, and the time-gap bucket since the previous exposure.
+`user_id`. User ID uses a 128-dimensional embedding; other categorical
+features use 8 dimensions. Each target exposure also carries four categorical
+request features: tab, hour, day of week, and the time-gap bucket since the
+previous exposure. Their embeddings are concatenated with the user features
+and jointly projected into two 256-dimensional tokens. Together with the
+uncompressed behavior sequences, the raw context contains 498 tokens.
 
-Training dates are visited in ascending order. Batches are shuffled within each
-date, and individual batches never cross date boundaries. A date's incomplete
+Each behavior sequence has its own one-layer Q-Former, learnable queries, and
+local positional embeddings; Q-Former parameters are not shared across
+sequences. The default query counts are 16 for click, 16 for long-view GID,
+16 for long-view duration, 8 for like, 4 for deep interaction, and 2 for
+hate. The 62 compressed behavior tokens plus two user/request tokens give
+the Context Encoder a total length of 64.
+
+The default backbone width is 256 with four attention heads and a
+1024-dimensional FFN. The shared GID embedding is 64-dimensional, while the
+long-view duration embedding is 8-dimensional; both are projected to the
+backbone width.
+
+The first three dates provide history only, middle dates train, and the final
+three dates test. Training dates are visited in ascending order. Batches are
+shuffled within each date and never cross date boundaries. A date's incomplete
 final batch is retained, so gradient accumulation may span adjacent dates.
 
 ```bash
