@@ -71,6 +71,61 @@ class SwiGLU(nn.Module):
         return self.w_down(F.silu(self.w_gate(x)) * self.w_up(x))
 
 
+class PerTokenLinear(nn.Module):
+    """Apply a distinct linear projection at each decoder position."""
+
+    def __init__(self, max_positions: int, in_features: int, out_features: int):
+        super().__init__()
+        if max_positions <= 0:
+            raise ValueError("max_positions must be positive")
+        self.max_positions = max_positions
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = nn.Parameter(
+            torch.empty(max_positions, out_features, in_features)
+        )
+        for position_weight in self.weight:
+            nn.init.xavier_uniform_(position_weight)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        position_offset: int = 0,
+    ) -> torch.Tensor:
+        if x.size(-1) != self.in_features:
+            raise ValueError(
+                f"expected input dim {self.in_features}, got {x.size(-1)}"
+            )
+        end = position_offset + x.size(1)
+        if position_offset < 0 or end > self.max_positions:
+            raise ValueError(
+                f"decoder positions [{position_offset}, {end}) exceed "
+                f"max_target_len={self.max_positions}"
+            )
+        weight = self.weight[position_offset:end]
+        return torch.einsum("bti,toi->bto", x, weight)
+
+
+class PerTokenSwiGLU(nn.Module):
+    """SwiGLU with independent gate, up, and down weights per position."""
+
+    def __init__(self, d_model: int, d_ff: int, max_positions: int):
+        super().__init__()
+        self.w_gate = PerTokenLinear(max_positions, d_model, d_ff)
+        self.w_up = PerTokenLinear(max_positions, d_model, d_ff)
+        self.w_down = PerTokenLinear(max_positions, d_ff, d_model)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        position_offset: int = 0,
+    ) -> torch.Tensor:
+        hidden = F.silu(
+            self.w_gate(x, position_offset)
+        ) * self.w_up(x, position_offset)
+        return self.w_down(hidden, position_offset)
+
+
 # --------------------------------------------------------------------------- #
 # 1. Context Processor
 # --------------------------------------------------------------------------- #
@@ -227,18 +282,64 @@ class SelfAttention(nn.Module):
     def __init__(self, config: LazyOneRecConfig):
         super().__init__()
         self.cfg = config
-        self.q_proj = nn.Linear(config.d_model, config.n_heads * config.head_dim, bias=False)
-        self.k_proj = nn.Linear(config.d_model, config.n_kv_heads * config.head_dim, bias=False)
-        self.v_proj = nn.Linear(config.d_model, config.n_kv_heads * config.head_dim, bias=False)
+        self.use_per_token_qkv = config.use_per_token_qkv
+        if self.use_per_token_qkv:
+            self.q_proj = PerTokenLinear(
+                config.max_target_len,
+                config.d_model,
+                config.n_heads * config.head_dim,
+            )
+            self.k_proj = PerTokenLinear(
+                config.max_target_len,
+                config.d_model,
+                config.n_kv_heads * config.head_dim,
+            )
+            self.v_proj = PerTokenLinear(
+                config.max_target_len,
+                config.d_model,
+                config.n_kv_heads * config.head_dim,
+            )
+        else:
+            self.q_proj = nn.Linear(
+                config.d_model,
+                config.n_heads * config.head_dim,
+                bias=False,
+            )
+            self.k_proj = nn.Linear(
+                config.d_model,
+                config.n_kv_heads * config.head_dim,
+                bias=False,
+            )
+            self.v_proj = nn.Linear(
+                config.d_model,
+                config.n_kv_heads * config.head_dim,
+                bias=False,
+            )
         self.o_proj = nn.Linear(config.n_heads * config.head_dim, config.d_model, bias=False)
         self.n_rep = config.n_heads // config.n_kv_heads
 
-    def forward(self, x, cos, sin, past_kv=None, use_cache=False):
+    def forward(
+        self,
+        x,
+        cos,
+        sin,
+        past_kv=None,
+        use_cache=False,
+        position_offset=0,
+    ):
         cfg = self.cfg
         b, t, _ = x.shape
-        q = self.q_proj(x).view(b, t, cfg.n_heads, cfg.head_dim).transpose(1, 2)
-        k = self.k_proj(x).view(b, t, cfg.n_kv_heads, cfg.head_dim).transpose(1, 2)
-        v = self.v_proj(x).view(b, t, cfg.n_kv_heads, cfg.head_dim).transpose(1, 2)
+        if self.use_per_token_qkv:
+            q = self.q_proj(x, position_offset)
+            k = self.k_proj(x, position_offset)
+            v = self.v_proj(x, position_offset)
+        else:
+            q = self.q_proj(x)
+            k = self.k_proj(x)
+            v = self.v_proj(x)
+        q = q.view(b, t, cfg.n_heads, cfg.head_dim).transpose(1, 2)
+        k = k.view(b, t, cfg.n_kv_heads, cfg.head_dim).transpose(1, 2)
+        v = v.view(b, t, cfg.n_kv_heads, cfg.head_dim).transpose(1, 2)
         if cos is not None:  # RoPE mode; None when learned absolute PE is used
             q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
         if past_kv is not None:  # incremental decoding
@@ -261,14 +362,37 @@ class LazyCrossAttention(nn.Module):
     def __init__(self, config: LazyOneRecConfig):
         super().__init__()
         self.cfg = config
-        self.q_proj = nn.Linear(config.d_model, config.n_heads * config.head_dim, bias=False)
+        self.use_per_token_qkv = config.use_per_token_qkv
+        if self.use_per_token_qkv:
+            self.q_proj = PerTokenLinear(
+                config.max_target_len,
+                config.d_model,
+                config.n_heads * config.head_dim,
+            )
+        else:
+            self.q_proj = nn.Linear(
+                config.d_model,
+                config.n_heads * config.head_dim,
+                bias=False,
+            )
         self.o_proj = nn.Linear(config.n_heads * config.head_dim, config.d_model, bias=False)
         self.n_rep = config.n_heads // config.n_kv_heads
 
-    def forward(self, x, context_kv, context_mask=None):
+    def forward(
+        self,
+        x,
+        context_kv,
+        context_mask=None,
+        position_offset=0,
+    ):
         cfg = self.cfg
         b, t, _ = x.shape
-        q = self.q_proj(x).view(b, t, cfg.n_heads, cfg.head_dim).transpose(1, 2)
+        q = (
+            self.q_proj(x, position_offset)
+            if self.use_per_token_qkv
+            else self.q_proj(x)
+        )
+        q = q.view(b, t, cfg.n_heads, cfg.head_dim).transpose(1, 2)
         k, v = context_kv  # (B, n_kv, Lc, Dh) -- precomputed, static
         k, v = repeat_kv(k, self.n_rep), repeat_kv(v, self.n_rep)
         attn_mask = None
@@ -292,15 +416,52 @@ class LazyDecoderBlock(nn.Module):
         self.ln_cross = RMSNorm(config.d_model, config.rms_norm_eps)
         self.cross_attn = LazyCrossAttention(config)
         self.ln_ffn = RMSNorm(config.d_model, config.rms_norm_eps)
-        self.ffn = SwiGLU(config.d_model, config.d_ff)
+        self.use_per_token_ffn = config.use_per_token_ffn
+        self.ffn = (
+            PerTokenSwiGLU(
+                config.d_model,
+                config.d_ff,
+                config.max_target_len,
+            )
+            if self.use_per_token_ffn
+            else SwiGLU(config.d_model, config.d_ff)
+        )
 
-    def forward(self, x, cos, sin, context_kv_blocks, context_mask, past_kv=None, use_cache=False):
+    def forward(
+        self,
+        x,
+        cos,
+        sin,
+        context_kv_blocks,
+        context_mask,
+        past_kv=None,
+        use_cache=False,
+        position_offset=0,
+    ):
         # Order matches sentiment/models DecoderBlock: cross-attn -> self-attn -> FFN.
         ctx_kv = context_kv_blocks[self.kv_block_idx]
-        x = x + self.cross_attn(self.ln_cross(x), ctx_kv, context_mask)
-        h, present = self.self_attn(self.ln_self(x), cos, sin, past_kv, use_cache)
+        x = x + self.cross_attn(
+            self.ln_cross(x),
+            ctx_kv,
+            context_mask,
+            position_offset,
+        )
+        h, present = self.self_attn(
+            self.ln_self(x),
+            cos,
+            sin,
+            past_kv,
+            use_cache,
+            position_offset,
+        )
         x = x + h
-        x = x + self.ffn(self.ln_ffn(x))
+        normalized = self.ln_ffn(x)
+        ffn_output = (
+            self.ffn(normalized, position_offset)
+            if self.use_per_token_ffn
+            else self.ffn(normalized)
+        )
+        x = x + ffn_output
         return x, present
 
 
@@ -388,7 +549,16 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         presents = [] if use_cache else None
         for i, layer in enumerate(self.layers):
             past = past_key_values[i] if past_key_values is not None else None
-            x, present = layer(x, cos, sin, context_kv_blocks, context_attention_mask, past, use_cache)
+            x, present = layer(
+                x,
+                cos,
+                sin,
+                context_kv_blocks,
+                context_attention_mask,
+                past,
+                use_cache,
+                seq_start,
+            )
             if use_cache:
                 presents.append(present)
 

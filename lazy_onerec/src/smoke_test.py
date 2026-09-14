@@ -20,6 +20,7 @@ from ..data.user_features import (
     CONTINUOUS_USER_FIELDS,
 )
 from ..model import LazyOneRecConfig, KuaiRandLazyOneRecForCausalLM
+from ..model.modeling import PerTokenLinear, PerTokenSwiGLU
 
 
 def main():
@@ -69,6 +70,14 @@ def main():
         )
         model.train()
         assert len(model.embed_tokens.level_emb) == 3
+        assert cfg.use_per_token_qkv
+        assert cfg.use_per_token_ffn
+        for layer in model.layers:
+            assert isinstance(layer.self_attn.q_proj, PerTokenLinear)
+            assert isinstance(layer.self_attn.k_proj, PerTokenLinear)
+            assert isinstance(layer.self_attn.v_proj, PerTokenLinear)
+            assert isinstance(layer.cross_attn.q_proj, PerTokenLinear)
+            assert isinstance(layer.ffn, PerTokenSwiGLU)
         feature_embedding = model.context_feature_embedding
         assert feature_embedding.gid_embedding.embedding_dim == 64
         assert (
@@ -186,6 +195,9 @@ def main():
             ].query_tokens.grad
             is not None
         )
+        per_token_gradient = model.layers[0].self_attn.q_proj.weight.grad
+        assert per_token_gradient is not None
+        assert torch.count_nonzero(per_token_gradient[:3]).item() > 0
         n_grad = sum(
             1 for parameter in model.parameters() if parameter.grad is not None
         )

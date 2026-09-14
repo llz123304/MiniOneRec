@@ -32,6 +32,8 @@ class LazyOneRecConfig(PretrainedConfig):
         d_ff: int = 1024,
         max_target_len: int = 4,          # BOS + 3-level codebook SID
         max_context_len: int = 3000,      # OneRec-V2 scales context up to ~3000
+        use_per_token_qkv: bool = True,
+        use_per_token_ffn: bool = True,
         # --- Lazy cross-attention knobs ---
         kv_sharing: bool = True,          # reuse one KV set across several layers
         kv_share_every: int = 2,          # S_kv: one KV block feeds this many layers
@@ -81,6 +83,8 @@ class LazyOneRecConfig(PretrainedConfig):
         self.d_ff = d_ff
         self.max_target_len = max_target_len
         self.max_context_len = max_context_len
+        self.use_per_token_qkv = bool(use_per_token_qkv)
+        self.use_per_token_ffn = bool(use_per_token_ffn)
         self.kv_sharing = kv_sharing
         if kv_share_every <= 0:
             raise ValueError("kv_share_every must be positive")

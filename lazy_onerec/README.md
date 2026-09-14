@@ -170,6 +170,11 @@ The default backbone width is 256 with four attention heads and a
 long-view duration embedding is 8-dimensional; both are projected to the
 backbone width.
 
+Decoder per-token QKV and per-token SwiGLU are enabled by default. Each target
+position has independent Self-Attention Q/K/V, Cross-Attention Q, and SwiGLU
+weights. Context K/V and attention output projections remain shared. Disable
+them with `per_token_qkv=false` or `per_token_ffn=false` in the training script.
+
 The first three dates provide history only, middle dates train, and the final
 three dates test. Training dates are visited in ascending order. Batches are
 shuffled within each date and never cross date boundaries. A date's incomplete

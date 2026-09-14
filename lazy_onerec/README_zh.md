@@ -161,6 +161,11 @@ User/Request token，Context Encoder 的实际输入长度为 64。
 五条 GID 序列共享 64 维 GID embedding，long-view duration 使用
 8 维 embedding，之后分别投影到主干宽度。
 
+Decoder 默认启用 per-token QKV 和 per-token SwiGLU。每个目标位置
+分别使用独立的 Self-Attention Q/K/V、Cross-Attention Q 和 SwiGLU
+参数；Context K/V 与 attention 输出投影保持共享。可在训练脚本中将
+`per_token_qkv` 或 `per_token_ffn` 设为 `false` 关闭。
+
 前 3 天仅构建历史，中间日期训练，最后 3 天测试。训练日期固定升序，
 每天内部随机组 batch，单个 batch 不会跨日期。
 每天不足 `micro_batch_size` 的尾部仍作为小 batch 训练，因此梯度累积

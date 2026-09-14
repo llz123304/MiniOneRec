@@ -42,6 +42,8 @@ n_layers=6
 n_context_layers=2
 n_heads=4
 n_kv_heads=2
+per_token_qkv=true
+per_token_ffn=true
 kv_sharing=true
 kv_share_every=2
 position_encoding="rope"  # rope | learned
@@ -102,6 +104,18 @@ if [[ "${kv_sharing}" == "true" ]]; then
   args+=(--kv-sharing)
 else
   args+=(--no-kv-sharing)
+fi
+
+if [[ "${per_token_qkv}" == "true" ]]; then
+  args+=(--per-token-qkv)
+else
+  args+=(--no-per-token-qkv)
+fi
+
+if [[ "${per_token_ffn}" == "true" ]]; then
+  args+=(--per-token-ffn)
+else
+  args+=(--no-per-token-ffn)
 fi
 
 [[ "${bf16}" == "true" ]] && args+=(--bf16)

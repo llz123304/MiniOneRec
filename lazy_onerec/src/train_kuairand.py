@@ -158,6 +158,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--n-kv-heads", type=int, default=2)
     parser.add_argument(
+        "--per-token-qkv",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--per-token-ffn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
         "--kv-sharing",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -250,6 +260,8 @@ def main() -> None:
         n_context_layers=args.n_context_layers,
         n_heads=args.n_heads,
         n_kv_heads=args.n_kv_heads,
+        use_per_token_qkv=args.per_token_qkv,
+        use_per_token_ffn=args.per_token_ffn,
         kv_sharing=args.kv_sharing,
         kv_share_every=args.kv_share_every,
         max_context_len=total_context_length(
