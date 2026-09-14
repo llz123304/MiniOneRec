@@ -27,9 +27,8 @@ revision=""
 data_root="lazy_onerec/KuaiRand-1K"
 captions="${data_root}/kuairand_video_captions.csv"
 categories="${data_root}/kuairand_video_categories.csv"
-scope="catalog"  # clicked | catalog
 work_dir=""
-output_dir=""  # Empty selects output/embeddings/<model>-<scope>-raw.
+output_dir=""  # Empty selects output/embeddings/<model>-catalog-raw.
 
 batch_size=512
 write_batch_size=8192
@@ -51,7 +50,6 @@ args=(
   --data-root "${data_root}"
   --captions "${captions}"
   --categories "${categories}"
-  --scope "${scope}"
   --batch-size "${batch_size}"
   --write-batch-size "${write_batch_size}"
   --max-length "${max_length}"
@@ -82,5 +80,4 @@ fi
 [[ "${rebuild_texts}" == "true" ]] && args+=(--rebuild-texts)
 [[ "${overwrite}" == "true" ]] && args+=(--overwrite)
 
-# Arguments supplied at invocation time are appended last and override defaults.
-exec "${python_bin}" -m lazy_onerec.src.embed_kuairand_items "${args[@]}" "$@"
+exec "${python_bin}" -m lazy_onerec.src.embed_kuairand_items "${args[@]}"

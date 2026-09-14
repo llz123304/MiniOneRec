@@ -1,13 +1,4 @@
-"""Lazy Decoder-Only recommender backbone (OneRec-V2 style) -- SKELETON.
-
-Status: STRUCTURAL SKELETON for review. The forward math is implemented for the
-standard blocks (RMSNorm, RoPE self-attention, SwiGLU FFN) so the shapes line up,
-but the pieces marked `# TODO` are the OneRec-V2-specific decisions you should
-review/tune before training:
-
-  1. ContextProcessor           -> how heterogeneous user signals become static KV
-  2. LazyCrossAttention         -> KV-sharing + GQA read of the context KV
-  3. generate() integration     -> encode context once, cache it, decode target
+"""Lazy Decoder-Only recommender backbone inspired by OneRec-V2.
 
 Design contract:
   - Target SID codes use the model's per-level SID embedding tables.
@@ -16,7 +7,7 @@ Design contract:
     slots independent from SID generation.
   - forward() returns CausalLMOutputWithPast(loss=..., logits=...).
 
-NOTE: weights are randomly initialized (from-scratch). There is NO from_pretrained.
+Weights are initialized from scratch.
 """
 
 from typing import Optional
@@ -28,7 +19,7 @@ from transformers import PreTrainedModel
 from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from ..sid_layout import N_SPECIAL, sid_level_offsets
+from ..sid.layout import N_SPECIAL, sid_level_offsets
 from .configuration import LazyOneRecConfig
 
 
@@ -81,7 +72,7 @@ class SwiGLU(nn.Module):
 
 
 # --------------------------------------------------------------------------- #
-# 1. Context Processor  (TODO: the core OneRec-V2 design choice)
+# 1. Context Processor
 # --------------------------------------------------------------------------- #
 class ContextEncoderLayer(nn.Module):
     """One bidirectional self-attention + FFN layer used to mix the context.
@@ -174,10 +165,7 @@ class ContextProcessor(nn.Module):
     Depth is controlled by config.n_context_layers (0 = pure projection, no
     self-attention mixing). This is the "encoder" of the lazy design, kept cheap.
 
-    TODO(you):
-      - Extend the input embedding for heterogeneous signals (profile/behavior/
-        multimodal), currently per-level SID tables via SidEmbedding.
-      - Whether v_l shares k_l's projection (S_kv=1) or has its own (S_kv=2).
+    Heterogeneous adapters may provide ``context_inputs_embeds`` directly.
     """
 
     def __init__(self, config: LazyOneRecConfig, embed_tokens: "SidEmbedding"):
@@ -277,8 +265,7 @@ class LazyCrossAttention(nn.Module):
     """Query = target hidden; Key/Value = STATIC context KV (from ContextProcessor).
 
     "Lazy": no KV projection on the context side at inference (it was computed
-    once), and GQA expansion is applied on read. This is the module that makes
-    OneRec-V2 cheap. TODO: confirm whether queries also need their own norm/scale.
+    once), and GQA expansion is applied on read.
     """
 
     def __init__(self, config: LazyOneRecConfig):
@@ -363,9 +350,6 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
     #    per-level SidEmbedding is not meant to be resized like an LLM's table) --
     def get_input_embeddings(self):
         return self.embed_tokens
-
-    def set_input_embeddings(self, value):
-        self.embed_tokens = value
 
     def get_output_embeddings(self):
         # Output weights are tied manually per level in forward(); there is no

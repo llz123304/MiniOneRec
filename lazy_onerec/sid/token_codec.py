@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
-from ..sid_layout import (
+from .layout import (
     BOS_ID,
     EOS_ID,
     N_SPECIAL,

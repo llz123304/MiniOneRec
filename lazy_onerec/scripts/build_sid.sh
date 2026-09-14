@@ -8,7 +8,7 @@ cd "${root}"
 python_bin="${python_bin:-python3}"
 gpu_id=0  # Used by rq-vae and rq-kmeans-plus.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-method="${method:-rq-kmeans}"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
+method="rq-kmeans"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
 embeddings="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_embeddings.npy"
 item_ids="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_ids.npy"
 require_unique=false
@@ -69,5 +69,4 @@ args=(
 [[ "${require_unique}" == "true" ]] && args+=(--require-unique)
 [[ "${no_kmeans_init}" == "true" ]] && args+=(--no-kmeans-init)
 
-# Arguments supplied at invocation time are appended last and override defaults.
-exec "${python_bin}" -m lazy_onerec.sid.build_sid "${args[@]}" "$@"
+exec "${python_bin}" -m lazy_onerec.sid.build_sid "${args[@]}"

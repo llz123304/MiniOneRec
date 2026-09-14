@@ -194,35 +194,6 @@ def catalog_video_ids(catalog_path: Path) -> np.ndarray:
     return np.unique(values)
 
 
-def clicked_video_ids(
-    data_dir: Path, catalog_ids: np.ndarray
-) -> np.ndarray:
-    max_video_id = int(catalog_ids.max())
-    selected = np.zeros(max_video_id + 1, dtype=np.bool_)
-    for path in sorted(data_dir.glob("log_standard_*_*.csv")):
-        chunks = pd.read_csv(
-            path,
-            usecols=["video_id", "is_click"],
-            dtype={"video_id": np.int32, "is_click": np.int8},
-            chunksize=500_000,
-        )
-        for chunk in tqdm(
-            chunks,
-            desc=f"Scanning {path.name}",
-            unit="chunk",
-            dynamic_ncols=True,
-        ):
-            ids = chunk.loc[chunk["is_click"].eq(1), "video_id"].to_numpy(
-                np.int64
-            )
-            ids = ids[(ids >= 0) & (ids <= max_video_id)]
-            selected[ids] = True
-    result = np.flatnonzero(selected).astype(np.int32)
-    catalog_mask = np.zeros(max_video_id + 1, dtype=np.bool_)
-    catalog_mask[catalog_ids] = True
-    return result[catalog_mask[result]]
-
-
 def source_signature(path: Path) -> Dict[str, object]:
     stat = path.stat()
     return {
@@ -252,7 +223,7 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
     categories_path = Path(args.categories)
     work_dir = Path(
         args.work_dir
-        or f"lazy_onerec/output/kuairand_items/{args.scope}"
+        or "lazy_onerec/output/kuairand_items/catalog"
     )
     work_dir.mkdir(parents=True, exist_ok=True)
     ids_path = work_dir / "item_ids.npy"
@@ -274,7 +245,7 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
             manifest = json.load(source)
         ids = np.load(ids_path, mmap_mode="r", allow_pickle=False)
         if (
-            manifest.get("scope") != args.scope
+            manifest.get("scope") != "catalog"
             or manifest.get("limit") != args.limit
             or manifest.get("sources") != expected_sources
             or int(manifest.get("num_items", -1)) != len(ids)
@@ -288,8 +259,6 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
         return ids_path, texts_path
 
     ids = catalog_video_ids(catalog_path)
-    if args.scope == "clicked":
-        ids = clicked_video_ids(data_dir, ids)
     if args.limit is not None:
         ids = ids[: args.limit]
     if len(ids) == 0:
@@ -351,7 +320,7 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
     atomic_json(
         manifest_path,
         {
-            "scope": args.scope,
+            "scope": "catalog",
             "limit": args.limit,
             "num_items": len(ids),
             "sources": expected_sources,
@@ -435,7 +404,7 @@ def encode_items(
         args.output_dir
         or (
             f"lazy_onerec/output/embeddings/"
-            f"{model_slug(args.model_name)}-{args.scope}"
+            f"{model_slug(args.model_name)}-catalog"
             f"{normalization_suffix}"
         )
     )
@@ -457,7 +426,7 @@ def encode_items(
     )
     model.max_seq_length = args.max_length
     full_dim = int(model.get_sentence_embedding_dimension())
-    output_dim = args.output_dim or full_dim
+    output_dim = full_dim if args.output_dim is None else args.output_dim
     if not 0 < output_dim <= full_dim:
         raise ValueError(
             f"output_dim must be in [1,{full_dim}], got {output_dim}"
@@ -474,7 +443,7 @@ def encode_items(
         "revision": args.revision,
         "model_profile": asdict(profile),
         "pooling": "sentence-transformers model configuration",
-        "scope": args.scope,
+        "scope": "catalog",
         "num_items": len(item_ids),
         "full_embedding_dim": full_dim,
         "output_dim": output_dim,
@@ -619,20 +588,14 @@ def parse_args() -> argparse.Namespace:
         default="lazy_onerec/KuaiRand-1K/kuairand_video_categories.csv",
     )
     parser.add_argument(
-        "--scope",
-        choices=("clicked", "catalog"),
-        default="clicked",
-        help="clicked videos or the complete 1K video catalog",
-    )
-    parser.add_argument(
         "--work-dir",
         help=(
             "shared item-text cache; defaults to "
-            "lazy_onerec/output/kuairand_items/<scope>"
+            "lazy_onerec/output/kuairand_items/catalog"
         ),
     )
     parser.add_argument("--output-dir")
-    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--write-batch-size", type=int, default=8192)
     parser.add_argument("--max-length", type=int, default=256)
     parser.add_argument("--output-dim", type=int)

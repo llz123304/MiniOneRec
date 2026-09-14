@@ -28,12 +28,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--item-ids")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
-        "--codebook-sizes", type=int, nargs="+", default=[256, 256, 256]
+        "--codebook-sizes", type=int, nargs="+", default=[512, 512, 512]
     )
     parser.add_argument(
         "--distance-metric",
         choices=DISTANCE_METRICS,
-        default="euclidean",
+        default="cosine",
     )
     parser.add_argument("--require-unique", action="store_true")
 

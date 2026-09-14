@@ -6,8 +6,9 @@
 KuaiRand video text -> item embedding -> three-level SID -> next-SID model
 ```
 
-Python code is under `lazy_onerec/src/`. Configure each command at the top of
-its Shell file under `lazy_onerec/scripts/`.
+Python code is organized under `data/`, `model/`, `sid/`, and `src/`. Configure
+each command at the top of its Shell file under `scripts/`. The package root
+contains documentation and dependency metadata only.
 
 ## Environment
 
@@ -50,19 +51,12 @@ lazy_onerec/KuaiRand-1K/
 └── kuairand_video_categories.csv
 ```
 
-Generate metadata samples:
-
-```bash
-lazy_onerec/scripts/sample_kuairand_metadata.sh
-```
-
 ## Build Item Embeddings
 
 Set these values in `embed_kuairand_items.sh`:
 
 ```bash
 model_name="Qwen/Qwen3-Embedding-0.6B"
-scope="catalog"       # All videos; clicked processes clicked videos only
 output_dim=""         # Native Qwen dimension is 1024; use 512 for MRL
 batch_size=512
 device="cuda"
@@ -139,7 +133,21 @@ full SID-space utilization = effective_cluster_count / (K1 * K2 * K3)
 ## Train
 
 Set model and optimization parameters in `train_kuairand.sh`. Set `bf16=true`
-when BF16 is supported.
+when BF16 is supported. Every exposure in the two standard recommendation logs
+is a target SID sample. Its context contains up to 128 preceding exposures with
+their click and interaction feedback. The random-exposure log is not used. This
+treats standard exposure as weak positive feedback and imitates the logging
+policy's exposure distribution.
+
+`user_features_1k.csv` is loaded once at startup. Each sample references 26
+categorical features and four `log1p`-standardized continuous features by
+`user_id`.
+Each target exposure also carries four categorical request features: tab,
+hour, day of week, and the time-gap bucket since the previous exposure.
+
+Training dates are visited in ascending order. Batches are shuffled within each
+date, and individual batches never cross date boundaries. A date's incomplete
+final batch is retained, so gradient accumulation may span adjacent dates.
 
 ```bash
 lazy_onerec/scripts/train_kuairand.sh
@@ -155,6 +163,4 @@ lazy_onerec/output/kuairand_model/
 
 ```bash
 lazy_onerec/scripts/smoke_test.sh
-lazy_onerec/scripts/embed_kuairand_items.sh --help
-lazy_onerec/scripts/build_sid.sh --help
 ```

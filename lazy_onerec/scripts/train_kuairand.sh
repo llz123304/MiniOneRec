@@ -28,8 +28,7 @@ kv_sharing=true
 kv_share_every=2
 position_encoding="rope"  # rope | learned
 
-# Optimization parameters.
-num_epochs=10
+# Optimization parameters. Training is a single chronological pass.
 batch_size=256
 micro_batch_size=32
 learning_rate=1e-3
@@ -54,7 +53,6 @@ args=(
   --n-kv-heads "${n_kv_heads}"
   --kv-share-every "${kv_share_every}"
   --position-encoding "${position_encoding}"
-  --num-epochs "${num_epochs}"
   --batch-size "${batch_size}"
   --micro-batch-size "${micro_batch_size}"
   --learning-rate "${learning_rate}"
@@ -72,5 +70,4 @@ fi
 
 [[ "${bf16}" == "true" ]] && args+=(--bf16)
 
-# Arguments supplied at invocation time are appended last and override defaults.
-exec "${python_bin}" -m lazy_onerec.src.train_kuairand "${args[@]}" "$@"
+exec "${python_bin}" -m lazy_onerec.src.train_kuairand "${args[@]}"

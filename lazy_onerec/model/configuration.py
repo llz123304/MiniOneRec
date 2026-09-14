@@ -1,8 +1,7 @@
 """Configuration for the Lazy Decoder-Only recommender (OneRec-V2 style).
 
-This is a *skeleton* config for a from-scratch backbone. It intentionally has no
-dependency on any pretrained checkpoint: every field below is a design knob you
-set yourself, and the weights are randomly initialized in the model.
+The backbone has no dependency on a pretrained checkpoint; all weights are
+initialized from scratch.
 
 Key idea (OneRec-V2, arXiv:2508.20900):
   - The user context (history / profile) is encoded ONCE into a set of static
@@ -15,7 +14,7 @@ So computation concentrates on target decoding rather than re-encoding context.
 
 from transformers import PretrainedConfig
 
-from ..sid_layout import BOS_ID, EOS_ID, N_SPECIAL, PAD_ID
+from ..sid.layout import BOS_ID, EOS_ID, N_SPECIAL, PAD_ID
 
 
 class LazyOneRecConfig(PretrainedConfig):
@@ -49,7 +48,24 @@ class LazyOneRecConfig(PretrainedConfig):
         tie_word_embeddings: bool = False,
         **kwargs,
     ):
-        self.codebook_sizes = codebook_sizes if codebook_sizes is not None else [256, 256, 256]
+        self.codebook_sizes = (
+            codebook_sizes if codebook_sizes is not None else [256, 256, 256]
+        )
+        if not self.codebook_sizes or any(
+            int(size) <= 0 for size in self.codebook_sizes
+        ):
+            raise ValueError("codebook_sizes must contain positive integers")
+        self.codebook_sizes = [int(size) for size in self.codebook_sizes]
+        if d_model <= 0 or n_heads <= 0 or n_kv_heads <= 0:
+            raise ValueError("d_model and attention head counts must be positive")
+        if d_model % n_heads != 0:
+            raise ValueError("d_model must be divisible by n_heads")
+        if n_heads % n_kv_heads != 0:
+            raise ValueError("n_heads must be divisible by n_kv_heads")
+        if position_encoding not in {"rope", "learned"}:
+            raise ValueError("position_encoding must be 'rope' or 'learned'")
+        if position_encoding == "rope" and (d_model // n_heads) % 2:
+            raise ValueError("RoPE requires an even attention head dimension")
         expected_vocab_size = N_SPECIAL + sum(self.codebook_sizes)
         if vocab_size is not None and vocab_size != expected_vocab_size:
             raise ValueError(
@@ -72,7 +88,6 @@ class LazyOneRecConfig(PretrainedConfig):
         self.dropout = dropout
         self.rms_norm_eps = rms_norm_eps
         self.rope_theta = rope_theta
-        assert position_encoding in ("rope", "learned"), position_encoding
         self.position_encoding = position_encoding
         super().__init__(
             pad_token_id=pad_token_id,
@@ -84,13 +99,7 @@ class LazyOneRecConfig(PretrainedConfig):
 
     @property
     def head_dim(self) -> int:
-        assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
         return self.d_model // self.n_heads
-
-    @classmethod
-    def from_codec(cls, codec, **kwargs):
-        """Build a config whose vocabulary matches a SidCodec exactly."""
-        return cls.from_codebook_sizes(codec.codebook_sizes, **kwargs)
 
     @classmethod
     def from_codebook_sizes(cls, codebook_sizes, **kwargs):

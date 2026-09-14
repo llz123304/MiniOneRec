@@ -25,10 +25,13 @@ from .neural_rq import (
 
 
 def load_embeddings(path: str) -> np.ndarray:
-    values = np.load(path).astype(np.float32, copy=False)
-    if values.ndim != 2:
-        raise ValueError(f"expected [N,D] embeddings, got {values.shape}")
-    return values
+    source = np.load(path, mmap_mode="r", allow_pickle=False)
+    if source.ndim != 2:
+        raise ValueError(f"expected [N,D] embeddings, got {source.shape}")
+    return source.astype(
+        np.float32,
+        copy=source.dtype != np.float32 or not source.flags.writeable,
+    )
 
 
 def load_item_ids(path: str | None, n_items: int) -> List[str]:
@@ -36,7 +39,9 @@ def load_item_ids(path: str | None, n_items: int) -> List[str]:
         return [str(i) for i in range(n_items)]
     source = Path(path)
     if source.suffix == ".npy":
-        values = np.load(source, allow_pickle=False).reshape(-1).tolist()
+        values = np.load(
+            source, mmap_mode="r", allow_pickle=False
+        ).reshape(-1)
     elif source.suffix == ".json":
         with source.open(encoding="utf-8") as f:
             values = json.load(f)

@@ -6,8 +6,8 @@
 KuaiRand 视频文本 -> Item Embedding -> 三层 SID -> next-SID 模型
 ```
 
-Python 代码位于 `lazy_onerec/src/`，运行参数统一在
-`lazy_onerec/scripts/` 的 Shell 文件顶部修改。
+Python 代码按 `data/`、`model/`、`sid/` 和 `src/` 分层，运行参数统一
+在 `scripts/` 的 Shell 文件顶部修改。根目录只保留文档和依赖文件。
 
 ## 环境
 
@@ -50,19 +50,12 @@ lazy_onerec/KuaiRand-1K/
 └── kuairand_video_categories.csv
 ```
 
-生成元数据样本：
-
-```bash
-lazy_onerec/scripts/sample_kuairand_metadata.sh
-```
-
 ## 生成 Item Embedding
 
 在 `embed_kuairand_items.sh` 中设置：
 
 ```bash
 model_name="Qwen/Qwen3-Embedding-0.6B"
-scope="catalog"       # 全部视频；clicked 仅处理点击过的视频
 output_dim=""         # Qwen 原生 1024 维；设为 512 使用 MRL 降维
 batch_size=512
 device="cuda"
@@ -137,7 +130,19 @@ lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 ## 训练
 
 在 `train_kuairand.sh` 中设置模型与训练参数。支持 BF16 时设置
-`bf16=true`。
+`bf16=true`。两个标准推荐日志中的每条曝光都作为目标 SID 样本，
+历史为目标时间之前最多 128 条曝光，并保留点击和互动反馈。随机曝光
+日志不参与训练。该目标将标准曝光视为弱正反馈，学习线上推荐策略的
+曝光分布。
+
+`user_features_1k.csv` 在启动时读取一次。每条样本通过 `user_id`
+引用 26 个类别特征和 4 个经过 `log1p` 标准化的连续特征。
+每条目标曝光还包含 4 个请求类别特征：`tab`、小时、星期和距上次
+曝光的时间间隔桶。
+
+训练日期固定升序，每天内部随机组 batch，单个 batch 不会跨日期。
+每天不足 `micro_batch_size` 的尾部仍作为小 batch 训练，因此梯度累积
+可能跨越相邻日期。
 
 ```bash
 lazy_onerec/scripts/train_kuairand.sh
@@ -153,6 +158,4 @@ lazy_onerec/output/kuairand_model/
 
 ```bash
 lazy_onerec/scripts/smoke_test.sh
-lazy_onerec/scripts/embed_kuairand_items.sh --help
-lazy_onerec/scripts/build_sid.sh --help
 ```

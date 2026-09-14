@@ -7,18 +7,23 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from ..kuairand_schema import (
+from ..data.schema import (
     BINARY_EVENT_FIELDS,
     N_PLAY_RATIO_BUCKETS,
     N_TAB_EMBEDDINGS,
     N_TIME_GAP_BUCKETS,
+    REQUEST_CATEGORICAL_FIELDS,
+)
+from ..data.user_features import (
+    CATEGORICAL_USER_FIELDS,
+    CONTINUOUS_USER_FIELDS,
 )
 from .configuration import LazyOneRecConfig
 from .modeling import LazyOneRecForCausalLM
 
 
 class KuaiRandContextEmbedding(nn.Module):
-    """Build one event token per clicked video from independent sequence slots."""
+    """Build one token per historical exposure from aligned feature slots."""
 
     def __init__(
         self,
@@ -82,6 +87,8 @@ class KuaiRandContextEmbedding(nn.Module):
 class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
     """LazyOneRec with an independent KuaiRand GID/action context encoder."""
 
+    accepts_loss_kwargs = False
+
     def __init__(
         self,
         config: LazyOneRecConfig,
@@ -112,6 +119,9 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
         context_play_ratio_bucket: torch.LongTensor,
         context_time_gap_bucket: torch.LongTensor,
         context_tab: torch.LongTensor,
+        user_categorical_features: torch.LongTensor,
+        user_continuous_features: torch.Tensor,
+        request_categorical_features: torch.LongTensor,
         target_input_ids: torch.LongTensor,
         labels: Optional[torch.LongTensor] = None,
         context_kv_blocks=None,
@@ -119,6 +129,25 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
         use_cache: bool = False,
         **kwargs,
     ):
+        batch_size = context_gid_ids.size(0)
+        if user_categorical_features.shape != (
+            batch_size,
+            len(CATEGORICAL_USER_FIELDS),
+        ):
+            raise ValueError("expected user_categorical_features with shape [B,26]")
+        if user_continuous_features.shape != (
+            batch_size,
+            len(CONTINUOUS_USER_FIELDS),
+        ):
+            raise ValueError("expected user_continuous_features with shape [B,4]")
+        if request_categorical_features.shape != (
+            batch_size,
+            len(REQUEST_CATEGORICAL_FIELDS),
+        ):
+            raise ValueError(
+                "expected request_categorical_features with shape [B,4]"
+            )
+        # Fusion is deferred until the user/request token layout is fixed.
         binary_context = {
             key: kwargs.pop(key)
             for key in tuple(kwargs)
