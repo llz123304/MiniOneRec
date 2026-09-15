@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import math
+import time
 
+import torch
 from torch.utils.data import DataLoader
 from transformers import Trainer, TrainingArguments, set_seed
 
@@ -91,6 +93,16 @@ class DayOrderedTrainer(Trainer):
             f"micro_batches={len(batch_sampler)} "
             "keep_partial_day_batches=True"
         )
+        if not getattr(self, "_logged_day_batches", False):
+            for date in batch_sampler.dates:
+                n_samples = len(batch_sampler.indices_by_date[date])
+                tail = n_samples % per_device_batch_size
+                print(
+                    f"[day] date={date} samples={n_samples:,} "
+                    f"micro_batches={batch_sampler.batch_counts[date]:,} "
+                    f"tail_batch={tail or per_device_batch_size}"
+                )
+            self._logged_day_batches = True
 
         dataloader_kwargs = {
             "batch_sampler": batch_sampler,
@@ -226,9 +238,39 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
+    run_started = time.perf_counter()
+    print(
+        f"[config] data_root={args.data_root} "
+        f"sid_artifact={args.sid_artifact} output_dir={args.output_dir}"
+    )
+    print(
+        f"[config] sample={args.sample} min_history={args.min_history} "
+        f"seed={args.seed} position_encoding={args.position_encoding}"
+    )
+    print(
+        f"[runtime] torch={torch.__version__} "
+        f"cuda_available={torch.cuda.is_available()} "
+        f"mps_available={torch.backends.mps.is_available()}"
+    )
+    if torch.cuda.is_available():
+        print(
+            f"[runtime] cuda_device={torch.cuda.current_device()} "
+            f"name={torch.cuda.get_device_name(torch.cuda.current_device())} "
+            f"bf16_supported={torch.cuda.is_bf16_supported()}"
+        )
 
+    stage_started = time.perf_counter()
     artifact = SemanticIDArtifact.load(args.sid_artifact)
+    print(
+        f"[stage] load_sid_artifact elapsed="
+        f"{time.perf_counter() - stage_started:.2f}s"
+    )
+    stage_started = time.perf_counter()
     corpus = KuaiRandExposureCorpus(args.data_root)
+    print(
+        f"[stage] build_exposure_corpus elapsed="
+        f"{time.perf_counter() - stage_started:.2f}s"
+    )
     history_lengths = {
         "click": args.click_history_length,
         "long_view": args.long_view_history_length,
@@ -244,6 +286,7 @@ def main() -> None:
         "deep_interact": args.deep_interact_query_tokens,
         "hate": args.hate_query_tokens,
     }
+    stage_started = time.perf_counter()
     sample_indices = build_exposure_sample_indices(
         corpus=corpus,
         sid_artifact=artifact,
@@ -251,6 +294,11 @@ def main() -> None:
         warmup_days=args.warmup_days,
         test_days=args.test_days,
     )
+    print(
+        f"[stage] build_sample_indices elapsed="
+        f"{time.perf_counter() - stage_started:.2f}s"
+    )
+    stage_started = time.perf_counter()
     train_dataset = KuaiRandNextExposureSidDataset(
         corpus=corpus,
         sid_artifact=artifact,
@@ -259,16 +307,43 @@ def main() -> None:
         sample=args.sample,
         seed=args.seed,
     )
+    print(
+        f"[stage] build_train_dataset elapsed="
+        f"{time.perf_counter() - stage_started:.2f}s"
+    )
     if not train_dataset:
         raise ValueError(
             "no training samples: SID artifact does not cover KuaiRand targets"
         )
 
+    total_exposures = sum(len(sequence.gid_ids) for sequence in corpus.sequences)
+    positive_exposures = sum(
+        int(sequence.positive_target.sum()) for sequence in corpus.sequences
+    )
+    train_dates = sorted(set(int(date) for date in sample_indices["train"].dates))
+    test_dates = sorted(set(int(date) for date in sample_indices["test"].dates))
+    train_date_range = (
+        f"{train_dates[0]}..{train_dates[-1]}" if train_dates else "empty"
+    )
+    test_date_range = (
+        f"{test_dates[0]}..{test_dates[-1]}" if test_dates else "empty"
+    )
     print(
-        f"[data] users={len(corpus.sequences)} "
-        f"gid_vocab={corpus.num_gid_embeddings} "
+        f"[data] users={len(corpus.sequences):,} "
+        f"exposures={total_exposures:,} positives={positive_exposures:,} "
+        f"positive_rate={positive_exposures / total_exposures:.4%}"
+    )
+    print(
+        f"[data] gid_vocab={corpus.num_gid_embeddings:,} "
         f"warmup_days={args.warmup_days} test_days={args.test_days} "
-        f"train={len(train_dataset)} test={len(sample_indices['test'])}"
+        f"train_candidates={len(sample_indices['train']):,} "
+        f"train_used={len(train_dataset):,} "
+        f"test={len(sample_indices['test']):,}"
+    )
+    print(
+        f"[split] train_dates={train_date_range} "
+        f"({len(train_dates)}) test_dates={test_date_range} "
+        f"({len(test_dates)})"
     )
     print(
         f"[user] categorical={corpus.user_features.categorical.shape[1]} "
@@ -285,6 +360,7 @@ def main() -> None:
         f"collision_rate={artifact.collision_rate:.6f}"
     )
 
+    stage_started = time.perf_counter()
     config = LazyOneRecConfig.from_codebook_sizes(
         artifact.codebook_sizes,
         d_model=args.d_model,
@@ -318,8 +394,34 @@ def main() -> None:
         qformer_query_counts=qformer_query_counts,
         qformer_layers=args.qformer_layers,
     )
-    n_params = sum(parameter.numel() for parameter in model.parameters())
-    print(f"[model] params={n_params:,}")
+    print(
+        f"[stage] initialize_model elapsed="
+        f"{time.perf_counter() - stage_started:.2f}s"
+    )
+    named_parameters = list(model.named_parameters())
+    n_params = sum(parameter.numel() for _, parameter in named_parameters)
+    trainable_params = sum(
+        parameter.numel()
+        for _, parameter in named_parameters
+        if parameter.requires_grad
+    )
+    gid_params = model.context_feature_embedding.gid_embedding.weight.numel()
+    qformer_params = sum(
+        parameter.numel()
+        for name, parameter in named_parameters
+        if "sequence_qformers" in name
+    )
+    decoder_params = sum(
+        parameter.numel()
+        for name, parameter in named_parameters
+        if name.startswith("layers.")
+    )
+    print(
+        f"[model] params={n_params:,} trainable={trainable_params:,} "
+        f"gid={gid_params:,} qformer={qformer_params:,} "
+        f"decoder={decoder_params:,} "
+        f"fp32_weights={n_params * 4 / 2**30:.2f}GiB"
+    )
 
     if (
         args.micro_batch_size <= 0
@@ -330,6 +432,24 @@ def main() -> None:
             "batch_size must be a positive multiple of micro_batch_size"
         )
     accumulation = args.batch_size // args.micro_batch_size
+    batch_preview = DayBatchSampler(
+        sample_dates=train_dataset.sample_dates,
+        batch_size=args.micro_batch_size,
+        seed=args.seed,
+    )
+    optimizer_steps = math.ceil(len(batch_preview) / accumulation)
+    print(
+        f"[optimization] micro_batch={args.micro_batch_size} "
+        f"gradient_accumulation={accumulation} "
+        f"effective_batch={args.batch_size} "
+        f"micro_batches={len(batch_preview):,} "
+        f"optimizer_steps={optimizer_steps:,}"
+    )
+    print(
+        f"[optimization] lr={args.learning_rate} "
+        f"weight_decay={args.weight_decay} warmup_steps={args.warmup_steps} "
+        f"logging_steps={args.logging_steps} bf16={args.bf16}"
+    )
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.micro_batch_size,
@@ -347,15 +467,33 @@ def main() -> None:
         remove_unused_columns=False,
         accelerator_config={"even_batches": False},
     )
+    print(
+        f"[runtime] trainer_device={training_args.device} "
+        f"world_size={training_args.world_size} "
+        f"dataloader_workers={training_args.dataloader_num_workers}"
+    )
     trainer = DayOrderedTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         data_collator=KuaiRandCollator(history_lengths=history_lengths),
     )
-    trainer.train()
+    training_started = time.perf_counter()
+    train_output = trainer.train()
+    print(
+        f"[stage] train elapsed={time.perf_counter() - training_started:.2f}s "
+        f"global_steps={trainer.state.global_step:,} "
+        f"train_loss={train_output.training_loss:.6f}"
+    )
+    save_started = time.perf_counter()
     trainer.save_model(args.output_dir)
-    print(f"[done] model saved to {args.output_dir}")
+    print(
+        f"[stage] save_model elapsed={time.perf_counter() - save_started:.2f}s"
+    )
+    print(
+        f"[done] model saved to {args.output_dir} "
+        f"total_elapsed={time.perf_counter() - run_started:.2f}s"
+    )
 
 
 if __name__ == "__main__":

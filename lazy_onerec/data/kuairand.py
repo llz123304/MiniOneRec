@@ -107,6 +107,9 @@ class ExposureSampleIndex:
     target_positions: array
     dates: array
 
+    def __len__(self) -> int:
+        return len(self.target_positions)
+
     @classmethod
     def empty(cls) -> "ExposureSampleIndex":
         return cls(array("I"), array("I"), array("i"))

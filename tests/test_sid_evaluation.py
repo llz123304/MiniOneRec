@@ -23,7 +23,7 @@ class _FakeGenerationModel:
             (batch_size, target_length, self.vocab_size),
             -100.0,
         )
-        logits[:, -1, :] = torch.arange(
+        logits[:, :, :] = torch.arange(
             self.vocab_size,
             dtype=torch.float32,
         )
@@ -57,24 +57,28 @@ class SidEvaluationTest(unittest.TestCase):
         self.assertEqual(
             metrics.compute(),
             {
-                "hr_at_10": 0.5,
-                "mrr_at_10": 0.25,
-                "sid0_accuracy": 1.0,
-                "sid1_accuracy": 1.0,
-                "sid2_accuracy": 0.0,
+                "sid0_hr_at_10": 1.0,
+                "sid0_mrr_at_10": 1.0,
+                "sid1_hr_at_10": 1.0,
+                "sid1_mrr_at_10": 1.0,
+                "sid2_hr_at_10": 0.5,
+                "sid2_mrr_at_10": 0.25,
+                "overall_hr_at_10": 0.5,
+                "overall_mrr_at_10": 0.25,
                 "invalid_sid_rate": 0.05,
             },
         )
 
     def test_constrained_beam_search_only_returns_valid_sids(self):
-        codebook_sizes = (12, 2, 2)
+        codebook_sizes = (12, 12, 12)
         valid_codes = [(first, first % 2, 0) for first in range(12)]
         prefix_index = SidPrefixIndex(valid_codes, codebook_sizes)
         model = _FakeGenerationModel(codebook_sizes)
+        context_inputs = {"dummy": torch.ones(2, 1)}
 
         predictions, scores = constrained_sid_beam_search(
             model=model,
-            context_inputs={"dummy": torch.ones(2, 1)},
+            context_inputs=context_inputs,
             prefix_index=prefix_index,
             beam_size=10,
         )

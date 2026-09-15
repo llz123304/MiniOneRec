@@ -195,15 +195,19 @@ lazy_onerec/scripts/evaluate_kuairand.sh
 评估使用不带缓存的 SID 约束 Top-10 Beam Search，仅输出：
 
 ```text
-hr_at_10
-mrr_at_10
-sid0_accuracy
-sid1_accuracy
-sid2_accuracy
+sid0_hr_at_10
+sid0_mrr_at_10
+sid1_hr_at_10
+sid1_mrr_at_10
+sid2_hr_at_10
+sid2_mrr_at_10
+overall_hr_at_10
+overall_mrr_at_10
 invalid_sid_rate
 ```
 
-这些指标均针对完整 SID 路径，不计算 item 粒度指标。
+分层与总体指标均从同一组约束 Beam Search 完整 SID 排名中统计，不使用
+teacher forcing，也不计算 item 粒度指标。
 
 ## 检查
 

@@ -83,14 +83,19 @@ class SidRankingMetrics:
     n_samples: int = 0
     n_hits: int = 0
     reciprocal_rank_sum: float = 0.0
-    level_correct: np.ndarray = field(init=False)
+    level_hits: np.ndarray = field(init=False)
+    level_reciprocal_rank_sums: np.ndarray = field(init=False)
     n_invalid: int = 0
     n_predictions: int = 0
 
     def __post_init__(self) -> None:
-        self.level_correct = np.zeros(
+        self.level_hits = np.zeros(
             len(self.prefix_index.codebook_sizes),
             dtype=np.int64,
+        )
+        self.level_reciprocal_rank_sums = np.zeros(
+            len(self.prefix_index.codebook_sizes),
+            dtype=np.float64,
         )
 
     def update(self, predictions, targets) -> None:
@@ -109,7 +114,6 @@ class SidRankingMetrics:
             raise ValueError(
                 f"targets must have shape [{predicted.shape[0]},{n_levels}]"
             )
-
         top_predictions = predicted[:, :EVALUATION_TOP_K].astype(
             np.int64,
             copy=False,
@@ -127,8 +131,16 @@ class SidRankingMetrics:
         self.reciprocal_rank_sum += float(
             np.where(has_hit, 1.0 / first_ranks, 0.0).sum()
         )
-        self.level_correct += (
-            top_predictions[:, 0, :] == target
+        level_matches = (
+            top_predictions == target[:, None, :]
+        ).transpose(0, 2, 1)
+        level_has_hit = level_matches.any(axis=2)
+        level_first_ranks = level_matches.argmax(axis=2) + 1
+        self.level_hits += level_has_hit.sum(axis=0)
+        self.level_reciprocal_rank_sums += np.where(
+            level_has_hit,
+            1.0 / level_first_ranks,
+            0.0,
         ).sum(axis=0)
         self.n_predictions += int(
             top_predictions.shape[0] * EVALUATION_TOP_K
@@ -142,17 +154,18 @@ class SidRankingMetrics:
     def compute(self) -> dict[str, float]:
         if self.n_samples == 0:
             raise ValueError("cannot compute metrics without samples")
-        metrics = {
-            "hr_at_10": self.n_hits / self.n_samples,
-            "mrr_at_10": self.reciprocal_rank_sum / self.n_samples,
-        }
-        metrics.update(
-            {
-                f"sid{level}_accuracy": (
-                    int(self.level_correct[level]) / self.n_samples
-                )
-                for level in range(len(self.level_correct))
-            }
+        metrics = {}
+        for level in range(len(self.level_hits)):
+            metrics[f"sid{level}_hr_at_10"] = (
+                int(self.level_hits[level]) / self.n_samples
+            )
+            metrics[f"sid{level}_mrr_at_10"] = (
+                float(self.level_reciprocal_rank_sums[level])
+                / self.n_samples
+            )
+        metrics["overall_hr_at_10"] = self.n_hits / self.n_samples
+        metrics["overall_mrr_at_10"] = (
+            self.reciprocal_rank_sum / self.n_samples
         )
         metrics["invalid_sid_rate"] = (
             self.n_invalid / self.n_predictions

@@ -83,6 +83,8 @@ class KuaiRandSampleIndexTest(unittest.TestCase):
 
         self.assertEqual(indices["train"].target_positions.tolist(), [5])
         self.assertEqual(indices["test"].target_positions.tolist(), [6])
+        self.assertEqual(len(indices["train"]), 1)
+        self.assertEqual(len(indices["test"]), 1)
 
     def test_only_positive_non_hate_targets_are_indexed(self):
         sequence = SimpleNamespace(

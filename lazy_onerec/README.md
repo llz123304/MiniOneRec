@@ -205,16 +205,20 @@ lazy_onerec/scripts/evaluate_kuairand.sh
 Evaluation uses non-cached, SID-constrained Top-10 beam search. It reports only:
 
 ```text
-hr_at_10
-mrr_at_10
-sid0_accuracy
-sid1_accuracy
-sid2_accuracy
+sid0_hr_at_10
+sid0_mrr_at_10
+sid1_hr_at_10
+sid1_mrr_at_10
+sid2_hr_at_10
+sid2_mrr_at_10
+overall_hr_at_10
+overall_mrr_at_10
 invalid_sid_rate
 ```
 
-These metrics operate on complete SID paths. Item-level metrics are not
-computed.
+Per-level and overall metrics are all computed from the same ranked complete
+SID paths produced by constrained beam search. No teacher-forced evaluation or
+item-level metrics are used.
 
 ## Checks
 
