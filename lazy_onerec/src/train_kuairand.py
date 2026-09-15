@@ -226,10 +226,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--micro-batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-steps", type=int, default=100)
-    parser.add_argument("--logging-steps", type=int, default=10)
+    parser.add_argument("--logging-steps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bf16", action="store_true")
     return parser.parse_args()
@@ -465,6 +466,9 @@ def main() -> None:
         eval_strategy="no",
         report_to=[],
         remove_unused_columns=False,
+        dataloader_num_workers=args.num_workers,
+        dataloader_persistent_workers=args.num_workers > 0,
+        dataloader_prefetch_factor=2 if args.num_workers > 0 else None,
         accelerator_config={"even_batches": False},
     )
     print(
