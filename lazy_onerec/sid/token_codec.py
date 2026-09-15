@@ -46,6 +46,16 @@ class SidTokenCodec:
             )
         return self.level_offsets[level] + code
 
+    def token_to_code(self, level: int, token: int) -> int:
+        if not 0 <= level < self.n_levels:
+            raise ValueError(f"invalid SID level: {level}")
+        code = int(token) - self.level_offsets[level]
+        if not 0 <= code < self.codebook_sizes[level]:
+            raise ValueError(
+                f"token {token} is outside SID level {level}"
+            )
+        return code
+
     def encode_codes(self, codes: Sequence[int]) -> List[int]:
         if len(codes) != self.n_levels:
             raise ValueError(
@@ -61,3 +71,13 @@ class SidTokenCodec:
 
     def decoder_labels(self, codes: Sequence[int]) -> List[int]:
         return [-100] + self.encode_codes(codes)
+
+    def decode_tokens(self, tokens: Sequence[int]) -> List[int]:
+        if len(tokens) != self.n_levels:
+            raise ValueError(
+                f"received {len(tokens)} tokens; expected {self.n_levels}"
+            )
+        return [
+            self.token_to_code(level, int(token))
+            for level, token in enumerate(tokens)
+        ]

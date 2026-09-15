@@ -22,6 +22,7 @@ from .schema import (
     GID_SEQUENCE_NAMES,
     N_TAB_EMBEDDINGS,
     N_TIME_GAP_BUCKETS,
+    POSITIVE_TARGET_FIELDS,
     SOURCE_BEHAVIOR_FIELDS,
     assign_day_split,
     day_split_boundaries,
@@ -77,6 +78,13 @@ def _local_calendar_from_time_ms(
     return date, day_of_week
 
 
+def _positive_target_mask(frame: pd.DataFrame) -> np.ndarray:
+    return (
+        frame.loc[:, list(POSITIVE_TARGET_FIELDS)].eq(1).any(axis=1)
+        & ~frame["is_hate"].eq(1)
+    ).to_numpy(dtype=np.bool_)
+
+
 @dataclass
 class UserExposureSequence:
     user_feature_row: int
@@ -90,6 +98,7 @@ class UserExposureSequence:
     behavior_time_ms: Dict[str, np.ndarray]
     behavior_gid_ids: Dict[str, np.ndarray]
     long_view_duration_bucket: np.ndarray
+    positive_target: np.ndarray
 
 
 @dataclass
@@ -210,6 +219,7 @@ class KuaiRandExposureCorpus:
                 name: time_ms[behavior_positions[name]]
                 for name in GID_SEQUENCE_NAMES
             }
+            positive_target = _positive_target_mask(group)
             user_feature_row = self.user_features.row_for_user(int(user_id))
             if user_feature_row == 0:
                 raise ValueError(
@@ -234,6 +244,7 @@ class KuaiRandExposureCorpus:
                     long_view_duration_bucket=group[
                         "long_view_duration_bucket"
                     ].to_numpy(np.int8)[behavior_positions["long_view"]],
+                    positive_target=positive_target,
                 )
             )
 
@@ -267,6 +278,8 @@ def build_exposure_sample_indices(
     }
     for sequence_index, sequence in enumerate(corpus.sequences):
         for position in range(min_history, len(sequence.gid_ids)):
+            if not bool(sequence.positive_target[position]):
+                continue
             target_time = int(sequence.time_ms[position])
             if (
                 min_history > 0

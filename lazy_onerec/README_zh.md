@@ -130,15 +130,17 @@ lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 ## 训练
 
 在 `train_kuairand.sh` 中设置模型与训练参数。支持 BF16 时设置
-`bf16=true`。两个标准推荐日志中的每条曝光都作为目标 SID 样本，
-随机曝光日志不参与训练。该目标将标准曝光视为弱正反馈，学习线上
-推荐策略的曝光分布。
+`bf16=true`。随机曝光日志不参与训练。标准日志中的曝光只有在包含
+click、long-view、like、follow、comment、forward 或 profile-enter
+反馈，并且不包含 hate 时，才作为目标 SID 样本。其他曝光仍保留在
+时间线中用于计算请求间隔和历史边界，但不作为生成目标。
 
 历史严格使用 `time_ms < target_time` 的行为，并独立构建 6 条序列：
 click GID 128、long-view GID 128、long-view duration 128、like GID
 64、deep-interaction GID 32 和 hate GID 16，共 496 个行为位置。
-deep interaction 合并 follow、comment 和 forward。long-view duration
-与 long-view GID 使用相同事件和 mask，但分别生成 token；其时长桶为：
+deep interaction 合并 follow、comment、forward 和 profile enter。
+long-view duration 与 long-view GID 使用相同事件和 mask，但分别生成
+token；其时长桶为：
 
 ```text
 min(round(sqrt(duration_ms / 1000)), 99)
@@ -181,6 +183,27 @@ lazy_onerec/scripts/train_kuairand.sh
 ```text
 lazy_onerec/output/kuairand_model/
 ```
+
+## 评估
+
+在 `evaluate_kuairand.sh` 中设置 checkpoint 和 SID artifact 路径，然后执行：
+
+```bash
+lazy_onerec/scripts/evaluate_kuairand.sh
+```
+
+评估使用不带缓存的 SID 约束 Top-10 Beam Search，仅输出：
+
+```text
+hr_at_10
+mrr_at_10
+sid0_accuracy
+sid1_accuracy
+sid2_accuracy
+invalid_sid_rate
+```
+
+这些指标均针对完整 SID 路径，不计算 item 粒度指标。
 
 ## 检查
 

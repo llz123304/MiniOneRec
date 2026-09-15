@@ -133,17 +133,18 @@ full SID-space utilization = effective_cluster_count / (K1 * K2 * K3)
 ## Train
 
 Set model and optimization parameters in `train_kuairand.sh`. Set `bf16=true`
-when BF16 is supported. Every exposure in the two standard recommendation logs
-is a target SID sample. The random-exposure log is not used. This treats
-standard exposure as weak positive feedback and imitates the logging policy's
-exposure distribution.
+when BF16 is supported. The random-exposure log is not used. A standard-log
+exposure becomes a target only when it has click, long-view, like, follow,
+comment, forward, or profile-enter feedback and does not have hate feedback.
+Other exposures remain in the chronological timeline for request gaps and
+history boundaries but are not generation targets.
 
 History strictly uses events with `time_ms < target_time` and forms six
 independent sequences: click GID 128, long-view GID 128, long-view duration
 128, like GID 64, deep-interaction GID 32, and hate GID 16, for 496 behavior
-positions. Deep interaction merges follow, comment, and forward. Long-view
-duration uses the same events and mask as long-view GID but produces separate
-tokens. Its bucket is:
+positions. Deep interaction merges follow, comment, forward, and profile
+enter. Long-view duration uses the same events and mask as long-view GID but
+produces separate tokens. Its bucket is:
 
 ```text
 min(round(sqrt(duration_ms / 1000)), 99)
@@ -192,6 +193,28 @@ Default model output:
 ```text
 lazy_onerec/output/kuairand_model/
 ```
+
+## Evaluate
+
+Set the checkpoint and SID artifact paths in `evaluate_kuairand.sh`, then run:
+
+```bash
+lazy_onerec/scripts/evaluate_kuairand.sh
+```
+
+Evaluation uses non-cached, SID-constrained Top-10 beam search. It reports only:
+
+```text
+hr_at_10
+mrr_at_10
+sid0_accuracy
+sid1_accuracy
+sid2_accuracy
+invalid_sid_rate
+```
+
+These metrics operate on complete SID paths. Item-level metrics are not
+computed.
 
 ## Checks
 

@@ -11,8 +11,10 @@ from lazy_onerec.data.schema import (
     N_LONG_VIEW_DURATION_BUCKETS,
     N_STATIC_CONTEXT_TOKENS,
     N_USER_REQUEST_CONTEXT_TOKENS,
+    POSITIVE_TARGET_FIELDS,
     REQUEST_CATEGORICAL_CARDINALITIES,
     REQUEST_CATEGORICAL_FIELDS,
+    SOURCE_BEHAVIOR_FIELDS,
     bucket_long_view_duration_ms,
     encode_category_with_unknown,
     recent_behavior_bounds,
@@ -75,7 +77,25 @@ class KuaiRandExposureSchemaTest(unittest.TestCase):
     def test_sparse_deep_interactions_are_merged(self):
         self.assertEqual(
             DEEP_INTERACTION_FIELDS,
-            ("is_follow", "is_comment", "is_forward"),
+            (
+                "is_follow",
+                "is_comment",
+                "is_forward",
+                "is_profile_enter",
+            ),
+        )
+        self.assertIn("is_profile_enter", SOURCE_BEHAVIOR_FIELDS)
+        self.assertEqual(
+            POSITIVE_TARGET_FIELDS,
+            (
+                "is_click",
+                "long_view",
+                "is_like",
+                "is_follow",
+                "is_comment",
+                "is_forward",
+                "is_profile_enter",
+            ),
         )
 
     def test_long_view_duration_bucket(self):

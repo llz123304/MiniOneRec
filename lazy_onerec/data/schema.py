@@ -11,10 +11,23 @@ SOURCE_BEHAVIOR_FIELDS = (
     "is_follow",
     "is_comment",
     "is_forward",
+    "is_profile_enter",
     "is_hate",
 )
 
-DEEP_INTERACTION_FIELDS = ("is_follow", "is_comment", "is_forward")
+DEEP_INTERACTION_FIELDS = (
+    "is_follow",
+    "is_comment",
+    "is_forward",
+    "is_profile_enter",
+)
+
+POSITIVE_TARGET_FIELDS = (
+    "is_click",
+    "long_view",
+    "is_like",
+    *DEEP_INTERACTION_FIELDS,
+)
 
 GID_SEQUENCE_NAMES = (
     "click",

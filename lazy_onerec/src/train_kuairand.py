@@ -251,18 +251,15 @@ def main() -> None:
         warmup_days=args.warmup_days,
         test_days=args.test_days,
     )
-    datasets = {
-        split: KuaiRandNextExposureSidDataset(
-            corpus=corpus,
-            sid_artifact=artifact,
-            sample_index=sample_indices[split],
-            history_lengths=history_lengths,
-            sample=args.sample if split == "train" else -1,
-            seed=args.seed,
-        )
-        for split in ("train", "test")
-    }
-    if not datasets["train"]:
+    train_dataset = KuaiRandNextExposureSidDataset(
+        corpus=corpus,
+        sid_artifact=artifact,
+        sample_index=sample_indices["train"],
+        history_lengths=history_lengths,
+        sample=args.sample,
+        seed=args.seed,
+    )
+    if not train_dataset:
         raise ValueError(
             "no training samples: SID artifact does not cover KuaiRand targets"
         )
@@ -271,7 +268,7 @@ def main() -> None:
         f"[data] users={len(corpus.sequences)} "
         f"gid_vocab={corpus.num_gid_embeddings} "
         f"warmup_days={args.warmup_days} test_days={args.test_days} "
-        f"train={len(datasets['train'])} test={len(datasets['test'])}"
+        f"train={len(train_dataset)} test={len(sample_indices['test'])}"
     )
     print(
         f"[user] categorical={corpus.user_features.categorical.shape[1]} "
@@ -353,17 +350,11 @@ def main() -> None:
     trainer = DayOrderedTrainer(
         model=model,
         args=training_args,
-        train_dataset=datasets["train"],
+        train_dataset=train_dataset,
         data_collator=KuaiRandCollator(history_lengths=history_lengths),
     )
     trainer.train()
     trainer.save_model(args.output_dir)
-    if datasets["test"]:
-        test_metrics = trainer.evaluate(
-            eval_dataset=datasets["test"],
-            metric_key_prefix="test",
-        )
-        trainer.save_metrics("test", test_metrics)
     print(f"[done] model saved to {args.output_dir}")
 
 
