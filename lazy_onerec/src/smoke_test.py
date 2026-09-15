@@ -159,6 +159,7 @@ def main():
             ),
             target_input_ids=target_input_ids,
             labels=labels,
+            num_items_in_batch=torch.tensor(batch_size * 3),
             **behavior_inputs,
         )
 

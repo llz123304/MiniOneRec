@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from array import array
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Sequence
 
@@ -38,7 +37,6 @@ from ..sid.token_codec import SidTokenCodec
 LOG_COLUMNS = (
     "user_id",
     "video_id",
-    "date",
     "hourmin",
     "time_ms",
     *SOURCE_BEHAVIOR_FIELDS,
@@ -49,7 +47,6 @@ LOG_COLUMNS = (
 LOG_DTYPES = {
     "user_id": np.int32,
     "video_id": np.int32,
-    "date": np.int32,
     "hourmin": np.int16,
     "time_ms": np.int64,
     **{field: np.int8 for field in SOURCE_BEHAVIOR_FIELDS},
@@ -60,6 +57,24 @@ LOG_DTYPES = {
 TIME_GAP_BINS_SECONDS = np.asarray(
     [60, 300, 1_800, 21_600, 86_400, 604_800, 2_592_000]
 )
+EVENT_TIMEZONE = "Asia/Shanghai"
+
+
+def _local_calendar_from_time_ms(
+    time_ms: pd.Series,
+) -> tuple[pd.Series, pd.Series]:
+    local_time = pd.to_datetime(
+        time_ms,
+        unit="ms",
+        utc=True,
+    ).dt.tz_convert(EVENT_TIMEZONE)
+    date = (
+        local_time.dt.year * 10_000
+        + local_time.dt.month * 100
+        + local_time.dt.day
+    ).astype(np.int32)
+    day_of_week = local_time.dt.dayofweek.astype(np.int8)
+    return date, day_of_week
 
 
 @dataclass
@@ -113,6 +128,10 @@ def _read_standard_logs(data_dir: Path) -> pd.DataFrame:
     logs = pd.concat(frames, ignore_index=True)
     logs.sort_values(["user_id", "time_ms"], inplace=True)
 
+    logs["date"], logs["request_day_of_week"] = (
+        _local_calendar_from_time_ms(logs["time_ms"])
+    )
+
     duration_seconds = logs["duration_ms"].clip(lower=0) / 1000.0
     logs["long_view_duration_bucket"] = np.minimum(
         np.rint(np.sqrt(duration_seconds)),
@@ -131,13 +150,6 @@ def _read_standard_logs(data_dir: Path) -> pd.DataFrame:
     )
     hour = logs["hourmin"] // 100
     logs["request_hour"] = hour.where(hour.between(0, 23), -1).astype(np.int8)
-    date_to_weekday = {
-        int(date): datetime.strptime(str(int(date)), "%Y%m%d").weekday()
-        for date in logs["date"].unique()
-    }
-    logs["request_day_of_week"] = (
-        logs["date"].map(date_to_weekday).astype(np.int8)
-    )
     return logs
 
 
@@ -239,6 +251,8 @@ def build_exposure_sample_indices(
     The last ``test_days`` dates form the test split; the remaining middle
     dates form the training split.
     """
+    if min_history < 0:
+        raise ValueError("min_history must be non-negative")
     if warmup_days < 0 or test_days < 0:
         raise ValueError("warmup_days and test_days must be non-negative")
 
@@ -253,6 +267,12 @@ def build_exposure_sample_indices(
     }
     for sequence_index, sequence in enumerate(corpus.sequences):
         for position in range(min_history, len(sequence.gid_ids)):
+            target_time = int(sequence.time_ms[position])
+            if (
+                min_history > 0
+                and int(sequence.time_ms[min_history - 1]) >= target_time
+            ):
+                continue
             target_video_id = str(int(sequence.gid_ids[position]) - 1)
             if target_video_id not in sid_artifact.item_codes:
                 continue

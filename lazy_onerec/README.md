@@ -175,10 +175,13 @@ position has independent Self-Attention Q/K/V, Cross-Attention Q, and SwiGLU
 weights. Context K/V and attention output projections remain shared. Disable
 them with `per_token_qkv=false` or `per_token_ffn=false` in the training script.
 
-The first three dates provide history only, middle dates train, and the final
-three dates test. Training dates are visited in ascending order. Batches are
-shuffled within each date and never cross date boundaries. A date's incomplete
-final batch is retained, so gradient accumulation may span adjacent dates.
+Natural dates are derived from `time_ms` in the `Asia/Shanghai` timezone; the
+source `date` field is not used for splitting. The first three dates provide
+history only, middle dates train, and the final three dates test. Training
+dates are visited in ascending order. Batches are shuffled within each date
+and never cross date boundaries. A date's incomplete final batch is retained,
+and the final incomplete gradient-accumulation window still performs an
+optimizer step.
 
 ```bash
 lazy_onerec/scripts/train_kuairand.sh

@@ -468,6 +468,7 @@ class LazyDecoderBlock(nn.Module):
 class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
     config_class = LazyOneRecConfig
     supports_gradient_checkpointing = True
+    accepts_loss_kwargs = True
 
     def __init__(self, config: LazyOneRecConfig):
         super().__init__(config)
@@ -517,6 +518,7 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         context_kv_blocks=None,          # reused across decoding steps (see generate)
         past_key_values=None,            # per-layer self-attn cache
         use_cache: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None,
         **kwargs,
     ):
         # 1) Encode context ONCE (skip if already cached during generation).
@@ -583,11 +585,20 @@ class LazyOneRecForCausalLM(PreTrainedModel, GenerationMixin):
         if labels is not None:
             shift_logits = logits[:, :-1, :].contiguous()
             shift_labels = labels[:, 1:].contiguous()
-            loss = F.cross_entropy(
+            loss_sum = F.cross_entropy(
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1),
                 ignore_index=-100,
+                reduction="sum",
             )
+            if num_items_in_batch is None:
+                num_items_in_batch = shift_labels.ne(-100).sum()
+            denominator = torch.as_tensor(
+                num_items_in_batch,
+                dtype=loss_sum.dtype,
+                device=loss_sum.device,
+            ).clamp_min(1)
+            loss = loss_sum / denominator
 
         out = CausalLMOutputWithPast(loss=loss, logits=logits, past_key_values=presents)
         # stash context KV so the next generation step can reuse it

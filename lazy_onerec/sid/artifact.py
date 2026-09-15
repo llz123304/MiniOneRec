@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import InitVar, dataclass, field
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence, Tuple
 
@@ -130,12 +131,24 @@ class SemanticIDArtifact:
         codebook_sizes: Sequence[int],
         metadata: Mapping[str, Any] | None = None,
     ) -> "SemanticIDArtifact":
+        missing = object()
+        item_codes: Dict[str, Tuple[int, ...]] = {}
+        for row_index, (item_id, row) in enumerate(
+            zip_longest(item_ids, codes, fillvalue=missing)
+        ):
+            if item_id is missing or row is missing:
+                raise ValueError(
+                    "item_ids and codes must contain the same number of rows"
+                )
+            normalized_id = str(item_id)
+            if normalized_id in item_codes:
+                raise ValueError(
+                    f"duplicate item_id {normalized_id!r} at row {row_index}"
+                )
+            item_codes[normalized_id] = tuple(int(code) for code in row)
         return cls(
             codebook_sizes=tuple(codebook_sizes),
-            item_codes={
-                str(item_id): tuple(int(code) for code in row)
-                for item_id, row in zip(item_ids, codes)
-            },
+            item_codes=item_codes,
             metadata=dict(metadata or {}),
             _normalized=True,
         )

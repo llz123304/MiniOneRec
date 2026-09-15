@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 from torch.utils.data import DataLoader
 from transformers import Trainer, TrainingArguments, set_seed
@@ -26,6 +27,41 @@ from ..sid.artifact import SemanticIDArtifact
 
 class DayOrderedTrainer(Trainer):
     """Trainer whose training batches never mix target dates."""
+
+    def set_initial_training_values(
+        self,
+        args,
+        dataloader,
+        total_train_batch_size,
+    ):
+        values = list(
+            super().set_initial_training_values(
+                args,
+                dataloader,
+                total_train_batch_size,
+            )
+        )
+        len_dataloader = values[5]
+        if len_dataloader is not None and args.max_steps < 0:
+            updates_per_epoch = max(
+                math.ceil(
+                    len_dataloader / args.gradient_accumulation_steps
+                ),
+                1,
+            )
+            values[1] = updates_per_epoch
+            values[6] = math.ceil(args.num_train_epochs * updates_per_epoch)
+        return tuple(values)
+
+    def get_batch_samples(self, epoch_iterator, _num_batches, device):
+        # Trainer 4.51 derives the final request from example count rather than
+        # micro-batch count. Always request a full accumulation window and let
+        # StopIteration return the smaller final window.
+        return super().get_batch_samples(
+            epoch_iterator,
+            self.args.gradient_accumulation_steps,
+            device,
+        )
 
     def get_train_dataloader(self) -> DataLoader:
         if self.train_dataset is None:

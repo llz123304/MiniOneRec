@@ -412,7 +412,7 @@ class KuaiRandContextEmbedding(nn.Module):
 class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
     """LazyOneRec with an independent KuaiRand GID/action context encoder."""
 
-    accepts_loss_kwargs = False
+    accepts_loss_kwargs = True
 
     def __init__(
         self,
