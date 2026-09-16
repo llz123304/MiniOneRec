@@ -19,6 +19,7 @@ from ..data.kuairand import (
 from ..data.schema import (
     DEFAULT_GID_SEQUENCE_LENGTHS,
     DEFAULT_QFORMER_QUERY_COUNTS,
+    POSITIVE_TARGET_MODES,
     raw_context_length,
     total_context_length,
 )
@@ -137,6 +138,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample", type=int, default=-1)
     parser.add_argument("--min-history", type=int, default=3)
     parser.add_argument(
+        "--positive-target",
+        choices=POSITIVE_TARGET_MODES,
+        default="all",
+    )
+    parser.add_argument(
         "--click-history-length",
         type=int,
         default=DEFAULT_GID_SEQUENCE_LENGTHS["click"],
@@ -248,6 +254,7 @@ def main() -> None:
     )
     print(
         f"[config] sample={args.sample} min_history={args.min_history} "
+        f"positive_target={args.positive_target} "
         f"seed={args.seed} position_encoding={args.position_encoding}"
     )
     print(
@@ -269,7 +276,10 @@ def main() -> None:
         f"{time.perf_counter() - stage_started:.2f}s"
     )
     stage_started = time.perf_counter()
-    corpus = KuaiRandExposureCorpus(args.data_root)
+    corpus = KuaiRandExposureCorpus(
+        args.data_root,
+        positive_target=args.positive_target,
+    )
     print(
         f"[stage] build_exposure_corpus elapsed="
         f"{time.perf_counter() - stage_started:.2f}s"
@@ -334,6 +344,7 @@ def main() -> None:
     print(
         f"[data] users={len(corpus.sequences):,} "
         f"exposures={total_exposures:,} positives={positive_exposures:,} "
+        f"positive_target={args.positive_target} "
         f"positive_rate={positive_exposures / total_exposures:.4%}"
     )
     print(
@@ -382,6 +393,7 @@ def main() -> None:
         ),
         position_encoding=args.position_encoding,
     )
+    config.positive_target = args.positive_target
     model = KuaiRandLazyOneRecForCausalLM(
         config,
         num_gid_embeddings=corpus.num_gid_embeddings,

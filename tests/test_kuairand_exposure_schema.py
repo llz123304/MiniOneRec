@@ -12,6 +12,7 @@ from lazy_onerec.data.schema import (
     N_STATIC_CONTEXT_TOKENS,
     N_USER_REQUEST_CONTEXT_TOKENS,
     POSITIVE_TARGET_FIELDS,
+    POSITIVE_TARGET_MODES,
     REQUEST_CATEGORICAL_CARDINALITIES,
     REQUEST_CATEGORICAL_FIELDS,
     SOURCE_BEHAVIOR_FIELDS,
@@ -96,6 +97,10 @@ class KuaiRandExposureSchemaTest(unittest.TestCase):
                 "is_forward",
                 "is_profile_enter",
             ),
+        )
+        self.assertEqual(
+            POSITIVE_TARGET_MODES,
+            ("all", "click", "long-view"),
         )
 
     def test_long_view_duration_bucket(self):

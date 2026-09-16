@@ -10,7 +10,10 @@ gpu_id="${LAZY_GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
 sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
-output_dir="${LAZY_MODEL_OUTPUT_DIR:-lazy_onerec/output/kuairand_model}"
+positive_target="${LAZY_POSITIVE_TARGET:-all}"  # all | click | long-view
+default_output_dir="lazy_onerec/output/kuairand_model"
+[[ "${positive_target}" != "all" ]] && default_output_dir+="-${positive_target}"
+output_dir="${LAZY_MODEL_OUTPUT_DIR:-${default_output_dir}}"
 
 # Dataset parameters.
 sample=-1  # -1 uses all training samples.
@@ -67,6 +70,7 @@ args=(
   --output-dir "${output_dir}"
   --sample "${sample}"
   --min-history "${min_history}"
+  --positive-target "${positive_target}"
   --click-history-length "${click_history_length}"
   --long-view-history-length "${long_view_history_length}"
   --like-history-length "${like_history_length}"

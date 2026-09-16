@@ -18,6 +18,7 @@ embedding_name=""  # Empty derives a stable name from embedding_model.
 sid_method="rq-kmeans"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
 sid_codebook_sizes=(512 512 512)
 sid_distance_metric="cosine"  # euclidean | cosine
+positive_target="${LAZY_POSITIVE_TARGET:-all}"  # all | click | long-view
 
 # Print all resolved paths and commands without running any stage.
 dry_run="${PIPELINE_DRY_RUN:-false}"
@@ -117,6 +118,7 @@ write_manifest() {
     "${sid_method}" \
     "${sid_codebook_sizes[*]}" \
     "${sid_distance_metric}" \
+    "${positive_target}" \
     "${embedding_dir}" \
     "${sid_dir}" \
     "${model_dir}" \
@@ -134,16 +136,17 @@ payload = {
     "embedding": {
         "model": sys.argv[3],
         "revision": sys.argv[4] or None,
-        "output_dir": sys.argv[8],
+        "output_dir": sys.argv[9],
     },
     "sid": {
         "method": sys.argv[5],
         "codebook_sizes": [int(value) for value in sys.argv[6].split()],
         "distance_metric": sys.argv[7],
-        "output_dir": sys.argv[9],
+        "output_dir": sys.argv[10],
     },
-    "model_dir": sys.argv[10],
-    "evaluation_dir": sys.argv[11],
+    "positive_target": sys.argv[8],
+    "model_dir": sys.argv[11],
+    "evaluation_dir": sys.argv[12],
 }
 temporary = path.with_suffix(".json.tmp")
 temporary.write_text(
@@ -200,6 +203,13 @@ case "${sid_distance_metric}" in
     exit 2
     ;;
 esac
+case "${positive_target}" in
+  all|click|long-view) ;;
+  *)
+    echo "unsupported positive_target=${positive_target}" >&2
+    exit 2
+    ;;
+esac
 for size in "${sid_codebook_sizes[@]}"; do
   if [[ ! "${size}" =~ ^[1-9][0-9]*$ ]]; then
     echo "SID codebook sizes must be positive integers" >&2
@@ -216,12 +226,16 @@ fi
 
 codebook_tag="$(IFS=-; printf '%s' "${sid_codebook_sizes[*]}")"
 sid_name="${sid_method}-${codebook_tag}-${sid_distance_metric}"
+target_suffix=""
+if [[ "${positive_target}" != "all" ]]; then
+  target_suffix="/target-${positive_target}"
+fi
 
 text_dir="${output_root}/kuairand_items/catalog"
 embedding_dir="${output_root}/embeddings/${embedding_name}"
 sid_dir="${output_root}/kuairand_sid/${embedding_name}/${sid_name}"
-model_dir="${output_root}/models/${embedding_name}/${sid_name}"
-evaluation_dir="${output_root}/evaluations/${embedding_name}/${sid_name}"
+model_dir="${output_root}/models/${embedding_name}/${sid_name}${target_suffix}"
+evaluation_dir="${output_root}/evaluations/${embedding_name}/${sid_name}${target_suffix}"
 
 embeddings="${embedding_dir}/item_embeddings.npy"
 embedding_item_ids="${embedding_dir}/item_ids.npy"
@@ -230,6 +244,7 @@ evaluation_output="${evaluation_dir}/test_sid_metrics.json"
 
 echo "[pipeline] embedding_model=${embedding_model}"
 echo "[pipeline] sid=${sid_method} ${sid_codebook_sizes[*]} ${sid_distance_metric}"
+echo "[pipeline] positive_target=${positive_target}"
 echo "[pipeline] embedding_dir=${embedding_dir}"
 echo "[pipeline] sid_dir=${sid_dir}"
 echo "[pipeline] model_dir=${model_dir}"
@@ -273,6 +288,7 @@ run_stage \
   "LAZY_GPU_ID=${gpu_id}" \
   "LAZY_DATA_ROOT=${data_root}" \
   "LAZY_SID_ARTIFACT=${sid_artifact}" \
+  "LAZY_POSITIVE_TARGET=${positive_target}" \
   "LAZY_MODEL_OUTPUT_DIR=${model_dir}" \
   bash lazy_onerec/scripts/train_kuairand.sh
 if [[ "${dry_run}" != "true" ]]; then
@@ -286,6 +302,7 @@ run_stage \
   "LAZY_GPU_ID=${gpu_id}" \
   "LAZY_DATA_ROOT=${data_root}" \
   "LAZY_SID_ARTIFACT=${sid_artifact}" \
+  "LAZY_POSITIVE_TARGET=${positive_target}" \
   "LAZY_MODEL_CHECKPOINT=${model_dir}" \
   "LAZY_EVALUATION_OUTPUT=${evaluation_output}" \
   bash lazy_onerec/scripts/evaluate_kuairand.sh

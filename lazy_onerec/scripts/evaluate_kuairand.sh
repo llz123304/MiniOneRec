@@ -10,7 +10,10 @@ gpu_id="${LAZY_GPU_ID:-0}"
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
 sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
-checkpoint="${LAZY_MODEL_CHECKPOINT:-lazy_onerec/output/kuairand_model}"
+positive_target="${LAZY_POSITIVE_TARGET:-all}"  # all | click | long-view
+default_checkpoint="lazy_onerec/output/kuairand_model"
+[[ "${positive_target}" != "all" ]] && default_checkpoint+="-${positive_target}"
+checkpoint="${LAZY_MODEL_CHECKPOINT:-${default_checkpoint}}"
 output="${LAZY_EVALUATION_OUTPUT:-${checkpoint}/test_sid_metrics.json}"
 
 sample=-1
@@ -32,6 +35,7 @@ args=(
   --checkpoint "${checkpoint}"
   --output "${output}"
   --sample "${sample}"
+  --positive-target "${positive_target}"
   --batch-size "${batch_size}"
   --num-workers "${num_workers}"
   --prefetch-factor "${prefetch_factor}"

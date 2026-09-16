@@ -14,24 +14,35 @@ from lazy_onerec.data.kuairand import (
 
 
 class KuaiRandSampleIndexTest(unittest.TestCase):
-    def test_positive_target_rule_and_hate_precedence(self):
+    def test_positive_target_modes_and_hate_precedence(self):
         frame = pd.DataFrame(
             {
-                "is_click": [0, 1, 1, 0],
-                "long_view": [0, 0, 0, 0],
-                "is_like": [0, 0, 0, 0],
-                "is_follow": [0, 0, 0, 0],
-                "is_comment": [0, 0, 0, 0],
-                "is_forward": [0, 0, 0, 0],
-                "is_profile_enter": [1, 0, 0, 0],
-                "is_hate": [0, 0, 1, 0],
+                "is_click": [0, 1, 1, 0, 0],
+                "long_view": [0, 0, 0, 1, 1],
+                "is_like": [0, 0, 0, 0, 0],
+                "is_follow": [0, 0, 0, 0, 0],
+                "is_comment": [0, 0, 0, 0, 0],
+                "is_forward": [0, 0, 0, 0, 0],
+                "is_profile_enter": [1, 0, 0, 0, 0],
+                "is_hate": [0, 0, 1, 0, 1],
             }
         )
 
         self.assertEqual(
             _positive_target_mask(frame).tolist(),
-            [True, True, False, False],
+            [True, True, False, True, False],
         )
+        self.assertEqual(
+            _positive_target_mask(frame, "click").tolist(),
+            [False, True, False, False, False],
+        )
+        self.assertEqual(
+            _positive_target_mask(frame, "long-view").tolist(),
+            [False, False, False, True, False],
+        )
+
+        with self.assertRaisesRegex(ValueError, "positive_target"):
+            _positive_target_mask(frame, "like")
 
     def test_calendar_is_derived_in_shanghai_timezone(self):
         local_time = pd.DatetimeIndex(

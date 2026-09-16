@@ -60,6 +60,7 @@ embedding_model="Qwen/Qwen3-Embedding-0.6B"
 sid_method="rq-kmeans"
 sid_codebook_sizes=(512 512 512)
 sid_distance_metric="cosine"
+positive_target="all"  # all | click | long-view
 ```
 
 Model, training, and inference settings remain in `train_kuairand.sh` and
@@ -78,12 +79,14 @@ Output directories preserve the embedding and SID lineage:
 lazy_onerec/output/
 ├── embeddings/<embedding-model>/
 ├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
-├── models/<embedding-model>/<sid-method-codebooks-distance>/
-└── evaluations/<embedding-model>/<sid-method-codebooks-distance>/
+├── models/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
+└── evaluations/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
 ```
 
 Complete artifacts are skipped automatically. Incomplete embedding output
-resumes from its saved progress. Each stage writes `pipeline_stage.json` with
+resumes from its saved progress. `all` keeps the original path; `click` and
+`long-view` use a `target-<mode>` subdirectory. Each stage writes
+`pipeline_stage.json` with
 the selected model, SID configuration, and upstream directories. Preview the
 resolved paths and commands without running them:
 
@@ -173,10 +176,16 @@ full SID-space utilization = effective_cluster_count / (K1 * K2 * K3)
 ## Train
 
 Set model and optimization parameters in `train_kuairand.sh`. Set `bf16=true`
-when BF16 is supported. The random-exposure log is not used. A standard-log
-exposure becomes a target only when it has click, long-view, like, follow,
-comment, forward, or profile-enter feedback and does not have hate feedback.
-Other exposures remain in the chronological timeline for request gaps and
+when BF16 is supported. `positive_target` selects target exposures:
+
+```text
+all       any click/long-view/like/follow/comment/forward/profile-enter
+click     is_click=1 only
+long-view long_view=1 only
+```
+
+All modes exclude `is_hate=1`. Random-exposure logs are not used. Other
+standard exposures remain in the chronological timeline for request gaps and
 history boundaries but are not generation targets.
 
 History strictly uses events with `time_ms < target_time` and forms six

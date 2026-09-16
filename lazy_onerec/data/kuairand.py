@@ -23,6 +23,7 @@ from .schema import (
     N_TAB_EMBEDDINGS,
     N_TIME_GAP_BUCKETS,
     POSITIVE_TARGET_FIELDS,
+    POSITIVE_TARGET_MODES,
     SOURCE_BEHAVIOR_FIELDS,
     assign_day_split,
     day_split_boundaries,
@@ -78,11 +79,22 @@ def _local_calendar_from_time_ms(
     return date, day_of_week
 
 
-def _positive_target_mask(frame: pd.DataFrame) -> np.ndarray:
-    return (
-        frame.loc[:, list(POSITIVE_TARGET_FIELDS)].eq(1).any(axis=1)
-        & ~frame["is_hate"].eq(1)
-    ).to_numpy(dtype=np.bool_)
+def _positive_target_mask(
+    frame: pd.DataFrame,
+    positive_target: str = "all",
+) -> np.ndarray:
+    if positive_target not in POSITIVE_TARGET_MODES:
+        raise ValueError(
+            f"positive_target must be one of {POSITIVE_TARGET_MODES}, "
+            f"got {positive_target!r}"
+        )
+    if positive_target == "all":
+        selected = frame.loc[:, list(POSITIVE_TARGET_FIELDS)].eq(1).any(axis=1)
+    elif positive_target == "click":
+        selected = frame["is_click"].eq(1)
+    else:
+        selected = frame["long_view"].eq(1)
+    return (selected & ~frame["is_hate"].eq(1)).to_numpy(dtype=np.bool_)
 
 
 @dataclass
@@ -171,7 +183,14 @@ class KuaiRandExposureCorpus:
     def __init__(
         self,
         data_root: str | Path,
+        positive_target: str = "all",
     ):
+        if positive_target not in POSITIVE_TARGET_MODES:
+            raise ValueError(
+                f"positive_target must be one of {POSITIVE_TARGET_MODES}, "
+                f"got {positive_target!r}"
+            )
+        self.positive_target_mode = positive_target
         data_root = Path(data_root)
         data_dir = data_root / "data" if (data_root / "data").is_dir() else data_root
         logs = _read_standard_logs(data_dir)
@@ -222,7 +241,10 @@ class KuaiRandExposureCorpus:
                 name: time_ms[behavior_positions[name]]
                 for name in GID_SEQUENCE_NAMES
             }
-            positive_target = _positive_target_mask(group)
+            positive_target_mask = _positive_target_mask(
+                group,
+                positive_target=positive_target,
+            )
             user_feature_row = self.user_features.row_for_user(int(user_id))
             if user_feature_row == 0:
                 raise ValueError(
@@ -247,7 +269,7 @@ class KuaiRandExposureCorpus:
                     long_view_duration_bucket=group[
                         "long_view_duration_bucket"
                     ].to_numpy(np.int8)[behavior_positions["long_view"]],
-                    positive_target=positive_target,
+                    positive_target=positive_target_mask,
                 )
             )
 

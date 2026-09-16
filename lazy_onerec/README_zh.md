@@ -59,6 +59,7 @@ embedding_model="Qwen/Qwen3-Embedding-0.6B"
 sid_method="rq-kmeans"
 sid_codebook_sizes=(512 512 512)
 sid_distance_metric="cosine"
+positive_target="all"  # all | click | long-view
 ```
 
 模型结构、训练和推理参数仍分别使用 `train_kuairand.sh` 与
@@ -77,11 +78,12 @@ lazy_onerec/scripts/run_kuairand_pipeline.sh
 lazy_onerec/output/
 ├── embeddings/<embedding-model>/
 ├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
-├── models/<embedding-model>/<sid-method-codebooks-distance>/
-└── evaluations/<embedding-model>/<sid-method-codebooks-distance>/
+├── models/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
+└── evaluations/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
 ```
 
 相同目录中的完整产物会自动跳过；Embedding 未完成时继续断点编码。
+`all` 保持原目录，`click` 和 `long-view` 使用 `target-<mode>` 子目录。
 每个阶段写入 `pipeline_stage.json`，记录使用的模型、SID 配置和上下游
 目录。只检查目录与命令而不执行：
 
@@ -169,10 +171,16 @@ lazy_onerec/output/kuairand_sid/<method>-<K1>-<K2>-<K3>-<distance>/
 ## 训练
 
 在 `train_kuairand.sh` 中设置模型与训练参数。支持 BF16 时设置
-`bf16=true`。随机曝光日志不参与训练。标准日志中的曝光只有在包含
-click、long-view、like、follow、comment、forward 或 profile-enter
-反馈，并且不包含 hate 时，才作为目标 SID 样本。其他曝光仍保留在
-时间线中用于计算请求间隔和历史边界，但不作为生成目标。
+`bf16=true`。`positive_target` 控制目标曝光：
+
+```text
+all       click/long-view/like/follow/comment/forward/profile-enter 任一为 1
+click     仅 is_click=1
+long-view 仅 long_view=1
+```
+
+三种模式都排除 `is_hate=1`。随机曝光日志不参与训练，其他标准曝光仍
+保留在时间线中用于计算请求间隔和历史边界，但不作为生成目标。
 
 历史严格使用 `time_ms < target_time` 的行为，并独立构建 6 条序列：
 click GID 128、long-view GID 128、long-view duration 128、like GID

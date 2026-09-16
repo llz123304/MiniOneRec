@@ -29,6 +29,12 @@ POSITIVE_TARGET_FIELDS = (
     *DEEP_INTERACTION_FIELDS,
 )
 
+POSITIVE_TARGET_MODES = (
+    "all",
+    "click",
+    "long-view",
+)
+
 GID_SEQUENCE_NAMES = (
     "click",
     "long_view",

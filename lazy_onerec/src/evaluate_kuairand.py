@@ -17,7 +17,7 @@ from ..data.kuairand import (
     KuaiRandNextExposureSidDataset,
     build_exposure_sample_indices,
 )
-from ..data.schema import DEFAULT_GID_SEQUENCE_LENGTHS
+from ..data.schema import DEFAULT_GID_SEQUENCE_LENGTHS, POSITIVE_TARGET_MODES
 from ..model import KuaiRandLazyOneRecForCausalLM
 from ..model.inference import sid_beam_search
 from ..sid.artifact import SemanticIDArtifact
@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--sample", type=int, default=-1)
+    parser.add_argument(
+        "--positive-target",
+        choices=POSITIVE_TARGET_MODES,
+        default="all",
+    )
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--prefetch-factor", type=int, default=4)
@@ -109,10 +114,24 @@ def main() -> None:
     model = KuaiRandLazyOneRecForCausalLM.from_pretrained(args.checkpoint)
     if tuple(model.config.codebook_sizes) != artifact.codebook_sizes:
         raise ValueError("checkpoint and SID artifact codebook sizes differ")
+    checkpoint_positive_target = getattr(
+        model.config,
+        "positive_target",
+        "all",
+    )
+    if checkpoint_positive_target != args.positive_target:
+        raise ValueError(
+            "checkpoint positive_target="
+            f"{checkpoint_positive_target!r} differs from evaluation "
+            f"positive_target={args.positive_target!r}"
+        )
     model.to(device)
     model.eval()
 
-    corpus = KuaiRandExposureCorpus(args.data_root)
+    corpus = KuaiRandExposureCorpus(
+        args.data_root,
+        positive_target=args.positive_target,
+    )
     expected_cardinalities = tuple(
         model.config.user_categorical_cardinalities
     )
@@ -168,7 +187,7 @@ def main() -> None:
         f"[evaluation] samples={len(dataset):,} batch_size={args.batch_size} "
         f"num_workers={args.num_workers} prefetch_factor={args.prefetch_factor} "
         f"beam_size={args.beam_size} bf16={args.bf16} "
-        f"kv_cache={args.kv_cache}"
+        f"kv_cache={args.kv_cache} positive_target={args.positive_target}"
     )
     for batch in tqdm(
         dataloader,
