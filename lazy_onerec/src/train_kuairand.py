@@ -225,8 +225,10 @@ def parse_args() -> argparse.Namespace:
         "--position-encoding", choices=["rope", "learned"], default="rope"
     )
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--micro-batch-size", type=int, default=32)
-    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--micro-batch-size", type=int, default=256)
+    parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--prefetch-factor", type=int, default=4)
+    parser.add_argument("--optimizer", default="adamw_torch_fused")
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-steps", type=int, default=100)
@@ -432,6 +434,10 @@ def main() -> None:
         raise ValueError(
             "batch_size must be a positive multiple of micro_batch_size"
         )
+    if args.num_workers < 0:
+        raise ValueError("num_workers must be non-negative")
+    if args.prefetch_factor <= 0:
+        raise ValueError("prefetch_factor must be positive")
     accumulation = args.batch_size // args.micro_batch_size
     batch_preview = DayBatchSampler(
         sample_dates=train_dataset.sample_dates,
@@ -449,7 +455,8 @@ def main() -> None:
     print(
         f"[optimization] lr={args.learning_rate} "
         f"weight_decay={args.weight_decay} warmup_steps={args.warmup_steps} "
-        f"logging_steps={args.logging_steps} bf16={args.bf16}"
+        f"optimizer={args.optimizer} logging_steps={args.logging_steps} "
+        f"bf16={args.bf16}"
     )
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -460,6 +467,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_steps,
+        optim=args.optimizer,
         logging_steps=args.logging_steps,
         bf16=args.bf16,
         save_strategy="epoch",
@@ -468,7 +476,9 @@ def main() -> None:
         remove_unused_columns=False,
         dataloader_num_workers=args.num_workers,
         dataloader_persistent_workers=args.num_workers > 0,
-        dataloader_prefetch_factor=2 if args.num_workers > 0 else None,
+        dataloader_prefetch_factor=(
+            args.prefetch_factor if args.num_workers > 0 else None
+        ),
         accelerator_config={"even_batches": False},
     )
     print(

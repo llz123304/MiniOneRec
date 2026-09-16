@@ -50,14 +50,16 @@ position_encoding="rope"  # rope | learned
 
 # Optimization parameters. Training is a single chronological pass.
 batch_size=256
-micro_batch_size=32
-num_workers=4
+micro_batch_size=256
+num_workers=8
+prefetch_factor=4
+optimizer="adamw_torch_fused"
 learning_rate=1e-3
 weight_decay=0.01
 warmup_steps=100
 logging_steps=20
 seed=42
-bf16=false
+bf16=true
 
 args=(
   --data-root "${data_root}"
@@ -95,6 +97,8 @@ args=(
   --batch-size "${batch_size}"
   --micro-batch-size "${micro_batch_size}"
   --num-workers "${num_workers}"
+  --prefetch-factor "${prefetch_factor}"
+  --optimizer "${optimizer}"
   --learning-rate "${learning_rate}"
   --weight-decay "${weight_decay}"
   --warmup-steps "${warmup_steps}"
