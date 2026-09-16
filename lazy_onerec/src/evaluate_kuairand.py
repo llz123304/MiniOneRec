@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -38,17 +39,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--sample", type=int, default=-1)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--warmup-days", type=int, default=3)
     parser.add_argument("--test-days", type=int, default=3)
     parser.add_argument("--min-history", type=int, default=3)
     parser.add_argument("--beam-size", type=int, default=EVALUATION_TOP_K)
     parser.add_argument(
+        "--kv-cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
         "--device",
         choices=("cuda", "mps", "cpu"),
         default="cuda",
     )
+    parser.add_argument("--bf16", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -84,8 +92,18 @@ def main() -> None:
         raise ValueError(
             f"beam_size must be at least {EVALUATION_TOP_K}"
         )
+    if args.batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    if args.num_workers < 0:
+        raise ValueError("num_workers must be non-negative")
+    if args.prefetch_factor <= 0:
+        raise ValueError("prefetch_factor must be positive")
     torch.manual_seed(args.seed)
     device = resolve_device(args.device)
+    if args.bf16 and (
+        device.type != "cuda" or not torch.cuda.is_bf16_supported()
+    ):
+        raise RuntimeError("BF16 evaluation requires a BF16-capable CUDA GPU")
 
     artifact = SemanticIDArtifact.load(args.sid_artifact)
     model = KuaiRandLazyOneRecForCausalLM.from_pretrained(args.checkpoint)
@@ -126,21 +144,33 @@ def main() -> None:
     )
     if not dataset:
         raise ValueError("test dataset is empty")
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        collate_fn=KuaiRandCollator(history_lengths=history_lengths),
-        pin_memory=device.type == "cuda",
-    )
+    dataloader_kwargs = {
+        "batch_size": args.batch_size,
+        "shuffle": False,
+        "num_workers": args.num_workers,
+        "collate_fn": KuaiRandCollator(history_lengths=history_lengths),
+        "pin_memory": device.type == "cuda",
+    }
+    if args.num_workers > 0:
+        dataloader_kwargs.update(
+            persistent_workers=True,
+            prefetch_factor=args.prefetch_factor,
+        )
+    dataloader = DataLoader(dataset, **dataloader_kwargs)
 
     codec = SidTokenCodec(artifact.codebook_sizes)
     prefix_index = SidPrefixIndex(
         artifact.item_codes.values(),
         artifact.codebook_sizes,
     )
+    prefix_index.allowed_mask_tensors(device)
     metrics = SidRankingMetrics(prefix_index)
+    print(
+        f"[evaluation] samples={len(dataset):,} batch_size={args.batch_size} "
+        f"num_workers={args.num_workers} prefetch_factor={args.prefetch_factor} "
+        f"beam_size={args.beam_size} bf16={args.bf16} "
+        f"kv_cache={args.kv_cache}"
+    )
     for batch in tqdm(
         dataloader,
         desc="Evaluating SID HR@10",
@@ -153,12 +183,19 @@ def main() -> None:
             name: tensor.to(device, non_blocking=device.type == "cuda")
             for name, tensor in batch.items()
         }
-        predictions, _ = constrained_sid_beam_search(
-            model=model,
-            context_inputs=context_inputs,
-            prefix_index=prefix_index,
-            beam_size=args.beam_size,
+        precision_context = (
+            torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            if args.bf16
+            else nullcontext()
         )
+        with precision_context:
+            predictions, _ = constrained_sid_beam_search(
+                model=model,
+                context_inputs=context_inputs,
+                prefix_index=prefix_index,
+                beam_size=args.beam_size,
+                use_kv_cache=args.kv_cache,
+            )
         metrics.update(
             predictions[:, :EVALUATION_TOP_K],
             targets,

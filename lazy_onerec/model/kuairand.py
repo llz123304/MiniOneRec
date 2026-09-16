@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Mapping, Optional
 
 import torch
 import torch.nn as nn
@@ -413,6 +413,23 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
     """LazyOneRec with an independent KuaiRand GID/action context encoder."""
 
     accepts_loss_kwargs = True
+    context_input_names = (
+        "click_gid_ids",
+        "click_attention_mask",
+        "long_view_gid_ids",
+        "long_view_attention_mask",
+        "long_view_duration_bucket",
+        "long_view_duration_attention_mask",
+        "like_gid_ids",
+        "like_attention_mask",
+        "deep_interact_gid_ids",
+        "deep_interact_attention_mask",
+        "hate_gid_ids",
+        "hate_attention_mask",
+        "user_categorical_features",
+        "user_continuous_features",
+        "request_categorical_features",
+    )
 
     def __init__(
         self,
@@ -524,6 +541,71 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
             rms_norm_eps=config.rms_norm_eps,
         )
 
+    def _embed_context(
+        self,
+        context_inputs: Mapping[str, torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        missing = [
+            name for name in self.context_input_names if name not in context_inputs
+        ]
+        if missing:
+            raise ValueError(f"missing context inputs: {missing}")
+
+        batch_size = context_inputs["click_gid_ids"].size(0)
+        if context_inputs["user_categorical_features"].shape != (
+            batch_size,
+            len(CATEGORICAL_USER_FIELDS),
+        ):
+            raise ValueError("expected user_categorical_features with shape [B,26]")
+        if context_inputs["user_continuous_features"].shape != (
+            batch_size,
+            len(CONTINUOUS_USER_FIELDS),
+        ):
+            raise ValueError("expected user_continuous_features with shape [B,4]")
+        if context_inputs["request_categorical_features"].shape != (
+            batch_size,
+            len(REQUEST_CATEGORICAL_FIELDS),
+        ):
+            raise ValueError(
+                "expected request_categorical_features with shape [B,4]"
+            )
+        return self.context_feature_embedding(
+            **{
+                name: context_inputs[name]
+                for name in self.context_input_names
+            }
+        )
+
+    def encode_context(
+        self,
+        context_inputs: Mapping[str, torch.Tensor],
+    ):
+        """Encode KuaiRand features once into reusable cross-attention KV."""
+        context_inputs_embeds, context_attention_mask = self._embed_context(
+            context_inputs
+        )
+        return self.context_processor(
+            context_inputs_embeds=context_inputs_embeds,
+            context_attention_mask=context_attention_mask,
+        )
+
+    def decode_with_context(
+        self,
+        target_input_ids: torch.LongTensor,
+        context_kv_blocks,
+        context_attention_mask: torch.Tensor,
+        past_key_values=None,
+        use_cache: bool = True,
+    ):
+        """Decode SID tokens without recomputing KuaiRand context features."""
+        return super().forward(
+            target_input_ids=target_input_ids,
+            context_kv_blocks=context_kv_blocks,
+            context_attention_mask=context_attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+        )
+
     def forward(
         self,
         click_gid_ids: torch.LongTensor,
@@ -548,44 +630,26 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
         use_cache: bool = False,
         **kwargs,
     ):
-        batch_size = click_gid_ids.size(0)
-        if user_categorical_features.shape != (
-            batch_size,
-            len(CATEGORICAL_USER_FIELDS),
-        ):
-            raise ValueError("expected user_categorical_features with shape [B,26]")
-        if user_continuous_features.shape != (
-            batch_size,
-            len(CONTINUOUS_USER_FIELDS),
-        ):
-            raise ValueError("expected user_continuous_features with shape [B,4]")
-        if request_categorical_features.shape != (
-            batch_size,
-            len(REQUEST_CATEGORICAL_FIELDS),
-        ):
-            raise ValueError(
-                "expected request_categorical_features with shape [B,4]"
-            )
-        context_inputs_embeds, context_attention_mask = (
-            self.context_feature_embedding(
-                click_gid_ids=click_gid_ids,
-                click_attention_mask=click_attention_mask,
-                long_view_gid_ids=long_view_gid_ids,
-                long_view_attention_mask=long_view_attention_mask,
-                long_view_duration_bucket=long_view_duration_bucket,
-                long_view_duration_attention_mask=(
+        context_inputs_embeds, context_attention_mask = self._embed_context(
+            {
+                "click_gid_ids": click_gid_ids,
+                "click_attention_mask": click_attention_mask,
+                "long_view_gid_ids": long_view_gid_ids,
+                "long_view_attention_mask": long_view_attention_mask,
+                "long_view_duration_bucket": long_view_duration_bucket,
+                "long_view_duration_attention_mask": (
                     long_view_duration_attention_mask
                 ),
-                like_gid_ids=like_gid_ids,
-                like_attention_mask=like_attention_mask,
-                deep_interact_gid_ids=deep_interact_gid_ids,
-                deep_interact_attention_mask=deep_interact_attention_mask,
-                hate_gid_ids=hate_gid_ids,
-                hate_attention_mask=hate_attention_mask,
-                user_categorical_features=user_categorical_features,
-                user_continuous_features=user_continuous_features,
-                request_categorical_features=request_categorical_features,
-            )
+                "like_gid_ids": like_gid_ids,
+                "like_attention_mask": like_attention_mask,
+                "deep_interact_gid_ids": deep_interact_gid_ids,
+                "deep_interact_attention_mask": deep_interact_attention_mask,
+                "hate_gid_ids": hate_gid_ids,
+                "hate_attention_mask": hate_attention_mask,
+                "user_categorical_features": user_categorical_features,
+                "user_continuous_features": user_continuous_features,
+                "request_categorical_features": request_categorical_features,
+            }
         )
         return super().forward(
             context_inputs_embeds=context_inputs_embeds,

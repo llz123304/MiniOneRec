@@ -1,4 +1,4 @@
-"""Non-cached constrained beam search for SID generation."""
+"""Cached constrained beam search for SID generation."""
 
 from __future__ import annotations
 
@@ -11,14 +11,64 @@ from ..sid.evaluation import EVALUATION_TOP_K, SidPrefixIndex
 from ..sid.layout import BOS_ID, sid_level_offsets
 
 
+def _repeat_context_cache(context_kv_blocks, repeats: int):
+    if repeats == 1:
+        return context_kv_blocks
+    return tuple(
+        (
+            key.repeat_interleave(repeats, dim=0),
+            value.repeat_interleave(repeats, dim=0),
+        )
+        for key, value in context_kv_blocks
+    )
+
+
+def _prefix_row_ids(
+    beam_codes: torch.LongTensor,
+    codebook_sizes: tuple[int, ...],
+) -> torch.LongTensor:
+    prefix_ids = torch.zeros(
+        beam_codes.shape[:2],
+        dtype=torch.long,
+        device=beam_codes.device,
+    )
+    for level in range(beam_codes.size(-1)):
+        prefix_ids = (
+            prefix_ids * codebook_sizes[level] + beam_codes[..., level]
+        )
+    return prefix_ids
+
+
+def _reorder_past_key_values(
+    past_key_values,
+    parent_indices: torch.LongTensor,
+    current_beams: int,
+):
+    batch_offsets = (
+        torch.arange(parent_indices.size(0), device=parent_indices.device)
+        * current_beams
+    )
+    flat_indices = (
+        parent_indices + batch_offsets.unsqueeze(1)
+    ).reshape(-1)
+    return tuple(
+        (
+            key.index_select(0, flat_indices),
+            value.index_select(0, flat_indices),
+        )
+        for key, value in past_key_values
+    )
+
+
 @torch.inference_mode()
 def constrained_sid_beam_search(
     model,
     context_inputs: Mapping[str, torch.Tensor],
     prefix_index: SidPrefixIndex,
     beam_size: int = EVALUATION_TOP_K,
+    use_kv_cache: bool = True,
 ) -> tuple[torch.LongTensor, torch.Tensor]:
-    """Generate valid raw SID codes without reusing context or decoder caches."""
+    """Generate valid raw SID codes with vectorized prefix constraints."""
     if beam_size < EVALUATION_TOP_K:
         raise ValueError(
             f"beam_size must be at least {EVALUATION_TOP_K}"
@@ -36,6 +86,23 @@ def constrained_sid_beam_search(
 
     device = first.device
     offsets = sid_level_offsets(codebook_sizes)
+    allowed_masks = prefix_index.allowed_mask_tensors(device)
+    cache_enabled = (
+        use_kv_cache
+        and callable(getattr(model, "encode_context", None))
+        and callable(getattr(model, "decode_with_context", None))
+    )
+    context_cache_by_beams = {}
+    past_key_values = None
+    if cache_enabled:
+        context_kv_blocks, context_attention_mask = model.encode_context(
+            context_inputs
+        )
+        context_cache_by_beams[1] = (
+            context_kv_blocks,
+            context_attention_mask,
+        )
+
     beam_codes = torch.empty(
         batch_size,
         1,
@@ -53,17 +120,45 @@ def constrained_sid_beam_search(
 
     for level, codebook_size in enumerate(codebook_sizes):
         current_beams = beam_codes.size(1)
-        expanded_context = {
-            name: values.repeat_interleave(current_beams, dim=0)
-            for name, values in context_inputs.items()
-        }
-        outputs = model(
-            target_input_ids=beam_tokens.view(
-                batch_size * current_beams,
-                -1,
-            ),
-            **expanded_context,
-        )
+        if cache_enabled:
+            if current_beams not in context_cache_by_beams:
+                context_cache_by_beams[current_beams] = (
+                    _repeat_context_cache(
+                        context_kv_blocks,
+                        current_beams,
+                    ),
+                    (
+                        None
+                        if context_attention_mask is None
+                        else context_attention_mask.repeat_interleave(
+                            current_beams,
+                            dim=0,
+                        )
+                    ),
+                )
+            expanded_kv, expanded_mask = context_cache_by_beams[current_beams]
+            outputs = model.decode_with_context(
+                target_input_ids=beam_tokens[:, :, -1:].reshape(
+                    batch_size * current_beams,
+                    1,
+                ),
+                context_kv_blocks=expanded_kv,
+                context_attention_mask=expanded_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+        else:
+            expanded_context = {
+                name: values.repeat_interleave(current_beams, dim=0)
+                for name, values in context_inputs.items()
+            }
+            outputs = model(
+                target_input_ids=beam_tokens.view(
+                    batch_size * current_beams,
+                    -1,
+                ),
+                **expanded_context,
+            )
         start = offsets[level]
         code_logits = outputs.logits[:, -1, start : start + codebook_size]
         code_logits = code_logits.view(
@@ -72,20 +167,13 @@ def constrained_sid_beam_search(
             codebook_size,
         )
 
-        allowed_mask = torch.zeros_like(code_logits, dtype=torch.bool)
-        for batch_index in range(batch_size):
-            for beam_index in range(current_beams):
-                prefix = beam_codes[batch_index, beam_index].tolist()
-                allowed = prefix_index.allowed(prefix)
-                if not allowed:
-                    raise ValueError(
-                        f"no valid continuation for SID prefix {prefix}"
-                    )
-                allowed_mask[
-                    batch_index,
-                    beam_index,
-                    torch.tensor(allowed, device=device),
-                ] = True
+        prefix_ids = _prefix_row_ids(beam_codes, codebook_sizes)
+        allowed_mask = allowed_masks[level].index_select(
+            0,
+            prefix_ids.reshape(-1),
+        ).view(batch_size, current_beams, codebook_size)
+        if torch.any(~allowed_mask.any(dim=-1)):
+            raise ValueError("a generated SID prefix has no valid continuation")
 
         log_probabilities = F.log_softmax(
             code_logits.masked_fill(~allowed_mask, float("-inf")),
@@ -111,6 +199,14 @@ def constrained_sid_beam_search(
             rounding_mode="floor",
         )
         next_codes = candidate_indices.remainder(codebook_size)
+        if cache_enabled and level + 1 < len(codebook_sizes):
+            if outputs.past_key_values is None:
+                raise ValueError("model did not return decoder KV cache")
+            past_key_values = _reorder_past_key_values(
+                outputs.past_key_values,
+                parent_indices,
+                current_beams,
+            )
 
         selected_codes = torch.gather(
             beam_codes,

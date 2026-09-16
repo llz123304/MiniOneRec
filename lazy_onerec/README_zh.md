@@ -192,7 +192,12 @@ lazy_onerec/output/kuairand_model/
 lazy_onerec/scripts/evaluate_kuairand.sh
 ```
 
-评估使用不带缓存的 SID 约束 Top-10 Beam Search，仅输出：
+评估默认使用 BF16、batch size 64、8 个 DataLoader workers，并缓存
+Context K/V 和 Decoder Self-Attention K/V。SID 前缀约束使用批量张量
+计算。显存不足时优先减小 `batch_size`；可设置 `kv_cache=false` 关闭
+缓存进行结果核对。
+
+评估使用 SID 约束 Top-10 Beam Search，仅输出：
 
 ```text
 sid0_hr_at_10

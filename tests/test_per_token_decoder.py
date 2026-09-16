@@ -85,6 +85,54 @@ class PerTokenDecoderTest(unittest.TestCase):
         self.assertIsInstance(shared_layer.self_attn.q_proj, nn.Linear)
         self.assertNotIsInstance(shared_layer.ffn, PerTokenSwiGLU)
 
+    def test_decoder_kv_cache_matches_full_sequence(self):
+        torch.manual_seed(2)
+        config = LazyOneRecConfig(
+            codebook_sizes=[8, 8, 8],
+            d_model=32,
+            d_ff=64,
+            n_layers=2,
+            n_context_layers=1,
+            n_heads=4,
+            n_kv_heads=2,
+        )
+        model = LazyOneRecForCausalLM(config).eval()
+        context = torch.randn(2, 5, config.d_model)
+        context_mask = torch.ones(2, 5, dtype=torch.long)
+        target = torch.tensor(
+            [
+                [config.bos_token_id, 3, 12],
+                [config.bos_token_id, 4, 13],
+            ],
+            dtype=torch.long,
+        )
+
+        with torch.inference_mode():
+            full = model(
+                context_inputs_embeds=context,
+                context_attention_mask=context_mask,
+                target_input_ids=target,
+            )
+            context_kv_blocks, encoded_mask = model.context_processor(
+                context,
+                context_mask,
+            )
+            past_key_values = None
+            incremental_logits = []
+            for position in range(target.size(1)):
+                step = model(
+                    context_kv_blocks=context_kv_blocks,
+                    context_attention_mask=encoded_mask,
+                    target_input_ids=target[:, position : position + 1],
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                )
+                incremental_logits.append(step.logits[:, -1])
+                past_key_values = step.past_key_values
+
+        incremental = torch.stack(incremental_logits, dim=1)
+        self.assertTrue(torch.allclose(full.logits, incremental, atol=1e-5))
+
 
 if __name__ == "__main__":
     unittest.main()

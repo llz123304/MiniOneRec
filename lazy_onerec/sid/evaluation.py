@@ -55,6 +55,32 @@ class SidPrefixIndex:
             }
             for level in allowed_sets
         )
+        final_level = len(self.codebook_sizes) - 1
+        final_size = self.codebook_sizes[-1]
+
+        def iter_complete_ids():
+            for prefix, allowed in self.allowed_next[final_level].items():
+                prefix_id = 0
+                for code, size in zip(
+                    prefix,
+                    self.codebook_sizes[:final_level],
+                ):
+                    prefix_id = prefix_id * size + code
+                base = prefix_id * final_size
+                for code in allowed:
+                    yield base + code
+
+        n_complete_ids = sum(
+            len(allowed)
+            for allowed in self.allowed_next[final_level].values()
+        )
+        self._valid_complete_ids = np.fromiter(
+            iter_complete_ids(),
+            dtype=np.int64,
+            count=n_complete_ids,
+        )
+        self._valid_complete_ids.sort()
+        self._allowed_mask_cache = {}
 
     def allowed(self, prefix: Sequence[int]) -> tuple[int, ...]:
         level = len(prefix)
@@ -67,6 +93,60 @@ class SidPrefixIndex:
         if len(normalized) != len(self.codebook_sizes):
             return False
         return normalized[-1] in self.allowed(normalized[:-1])
+
+    def contains_many(self, codes) -> np.ndarray:
+        """Vectorized membership test for complete raw SID codes."""
+        values = _to_numpy(codes).astype(np.int64, copy=False)
+        if values.ndim != 2 or values.shape[1] != len(self.codebook_sizes):
+            raise ValueError(
+                "codes must have shape [N, number_of_sid_levels]"
+            )
+        in_range = np.ones(values.shape[0], dtype=np.bool_)
+        encoded = np.zeros(values.shape[0], dtype=np.int64)
+        for level, size in enumerate(self.codebook_sizes):
+            in_range &= (values[:, level] >= 0) & (values[:, level] < size)
+            encoded = encoded * size + values[:, level]
+
+        positions = np.searchsorted(self._valid_complete_ids, encoded)
+        safe_positions = np.minimum(
+            positions,
+            len(self._valid_complete_ids) - 1,
+        )
+        return (
+            in_range
+            & (positions < len(self._valid_complete_ids))
+            & (self._valid_complete_ids[safe_positions] == encoded)
+        )
+
+    def allowed_mask_tensors(
+        self,
+        device: torch.device | str,
+    ) -> tuple[torch.BoolTensor, ...]:
+        """Return dense next-code masks indexed by mixed-radix prefix IDs."""
+        resolved_device = torch.device(device)
+        cache_key = (resolved_device.type, resolved_device.index)
+        cached = self._allowed_mask_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        masks = []
+        prefix_space_size = 1
+        for level, codebook_size in enumerate(self.codebook_sizes):
+            mask = np.zeros(
+                (prefix_space_size, codebook_size),
+                dtype=np.bool_,
+            )
+            for prefix, allowed in self.allowed_next[level].items():
+                prefix_id = 0
+                for code, size in zip(prefix, self.codebook_sizes[:level]):
+                    prefix_id = prefix_id * size + code
+                mask[prefix_id, np.asarray(allowed, dtype=np.int64)] = True
+            masks.append(torch.from_numpy(mask).to(resolved_device))
+            prefix_space_size *= codebook_size
+
+        result = tuple(masks)
+        self._allowed_mask_cache[cache_key] = result
+        return result
 
 
 def _to_numpy(values) -> np.ndarray:
@@ -145,11 +225,10 @@ class SidRankingMetrics:
         self.n_predictions += int(
             top_predictions.shape[0] * EVALUATION_TOP_K
         )
-        self.n_invalid += sum(
-            not self.prefix_index.contains(codes)
-            for sample in top_predictions
-            for codes in sample
+        valid_predictions = self.prefix_index.contains_many(
+            top_predictions.reshape(-1, n_levels)
         )
+        self.n_invalid += int((~valid_predictions).sum())
 
     def compute(self) -> dict[str, float]:
         if self.n_samples == 0:

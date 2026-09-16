@@ -202,7 +202,12 @@ Set the checkpoint and SID artifact paths in `evaluate_kuairand.sh`, then run:
 lazy_onerec/scripts/evaluate_kuairand.sh
 ```
 
-Evaluation uses non-cached, SID-constrained Top-10 beam search. It reports only:
+Evaluation defaults to BF16, batch size 64, eight DataLoader workers, cached
+Context K/V and Decoder Self-Attention K/V, and tensorized SID-prefix
+constraints. Reduce `batch_size` first if GPU memory is insufficient. Set
+`kv_cache=false` to disable caching for result comparisons.
+
+Evaluation uses SID-constrained Top-10 beam search. It reports only:
 
 ```text
 sid0_hr_at_10
