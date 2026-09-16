@@ -6,19 +6,19 @@ cd "${root}"
 
 # Edit this section to configure SID construction.
 python_bin="${python_bin:-python3}"
-gpu_id=0  # Used by rq-vae and rq-kmeans-plus.
+gpu_id="${LAZY_GPU_ID:-0}"  # Used by rq-vae and rq-kmeans-plus.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-method="rq-kmeans"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
-embeddings="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_embeddings.npy"
-item_ids="lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_ids.npy"
+method="${LAZY_SID_METHOD:-rq-kmeans}"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
+embeddings="${LAZY_EMBEDDINGS_PATH:-lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_embeddings.npy}"
+item_ids="${LAZY_EMBEDDING_ITEM_IDS:-lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/item_ids.npy}"
 require_unique=false
 
 # SID experiment parameters.
-codebook_sizes=(512 512 512)
-distance_metric="cosine"  # euclidean | cosine
+read -r -a codebook_sizes <<< "${LAZY_SID_CODEBOOK_SIZES:-512 512 512}"
+distance_metric="${LAZY_SID_DISTANCE_METRIC:-cosine}"  # euclidean | cosine
 
 codebook_tag="$(IFS=-; echo "${codebook_sizes[*]}")"
-output_dir="lazy_onerec/output/kuairand_sid/${method}-${codebook_tag}-${distance_metric}"
+output_dir="${LAZY_SID_OUTPUT_DIR:-lazy_onerec/output/kuairand_sid/${method}-${codebook_tag}-${distance_metric}}"
 
 # K-means parameters.
 max_iter=100

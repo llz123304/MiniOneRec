@@ -6,12 +6,12 @@ cd "${root}"
 
 # Edit this section to configure SID generation evaluation.
 python_bin="${python_bin:-python3}"
-gpu_id=0
+gpu_id="${LAZY_GPU_ID:-0}"
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-data_root="lazy_onerec/KuaiRand-1K"
-sid_artifact="lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json"
-checkpoint="lazy_onerec/output/kuairand_model"
-output="lazy_onerec/output/kuairand_model/test_sid_metrics.json"
+data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
+sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
+checkpoint="${LAZY_MODEL_CHECKPOINT:-lazy_onerec/output/kuairand_model}"
+output="${LAZY_EVALUATION_OUTPUT:-${checkpoint}/test_sid_metrics.json}"
 
 sample=-1
 batch_size=64

@@ -1,4 +1,4 @@
-"""Cached constrained beam search for SID generation."""
+"""Cached unconstrained beam search for native SID generation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Mapping
 import torch
 import torch.nn.functional as F
 
-from ..sid.evaluation import EVALUATION_TOP_K, SidPrefixIndex
+from ..sid.evaluation import EVALUATION_TOP_K
 from ..sid.layout import BOS_ID, sid_level_offsets
 
 
@@ -21,22 +21,6 @@ def _repeat_context_cache(context_kv_blocks, repeats: int):
         )
         for key, value in context_kv_blocks
     )
-
-
-def _prefix_row_ids(
-    beam_codes: torch.LongTensor,
-    codebook_sizes: tuple[int, ...],
-) -> torch.LongTensor:
-    prefix_ids = torch.zeros(
-        beam_codes.shape[:2],
-        dtype=torch.long,
-        device=beam_codes.device,
-    )
-    for level in range(beam_codes.size(-1)):
-        prefix_ids = (
-            prefix_ids * codebook_sizes[level] + beam_codes[..., level]
-        )
-    return prefix_ids
 
 
 def _reorder_past_key_values(
@@ -61,21 +45,18 @@ def _reorder_past_key_values(
 
 
 @torch.inference_mode()
-def constrained_sid_beam_search(
+def sid_beam_search(
     model,
     context_inputs: Mapping[str, torch.Tensor],
-    prefix_index: SidPrefixIndex,
     beam_size: int = EVALUATION_TOP_K,
     use_kv_cache: bool = True,
 ) -> tuple[torch.LongTensor, torch.Tensor]:
-    """Generate valid raw SID codes with vectorized prefix constraints."""
+    """Generate native raw SID codes without filtering invalid SID paths."""
     if beam_size < EVALUATION_TOP_K:
         raise ValueError(
             f"beam_size must be at least {EVALUATION_TOP_K}"
         )
     codebook_sizes = tuple(int(size) for size in model.config.codebook_sizes)
-    if codebook_sizes != prefix_index.codebook_sizes:
-        raise ValueError("model and SID prefix index codebook sizes differ")
     if not context_inputs:
         raise ValueError("context_inputs must not be empty")
 
@@ -86,7 +67,6 @@ def constrained_sid_beam_search(
 
     device = first.device
     offsets = sid_level_offsets(codebook_sizes)
-    allowed_masks = prefix_index.allowed_mask_tensors(device)
     cache_enabled = (
         use_kv_cache
         and callable(getattr(model, "encode_context", None))
@@ -167,25 +147,14 @@ def constrained_sid_beam_search(
             codebook_size,
         )
 
-        prefix_ids = _prefix_row_ids(beam_codes, codebook_sizes)
-        allowed_mask = allowed_masks[level].index_select(
-            0,
-            prefix_ids.reshape(-1),
-        ).view(batch_size, current_beams, codebook_size)
-        if torch.any(~allowed_mask.any(dim=-1)):
-            raise ValueError("a generated SID prefix has no valid continuation")
-
-        log_probabilities = F.log_softmax(
-            code_logits.masked_fill(~allowed_mask, float("-inf")),
-            dim=-1,
-        )
+        log_probabilities = F.log_softmax(code_logits, dim=-1)
         candidate_scores = (
             beam_scores.unsqueeze(-1) + log_probabilities
         ).view(batch_size, -1)
         finite_candidates = torch.isfinite(candidate_scores).sum(dim=1)
         if torch.any(finite_candidates < beam_size):
             raise ValueError(
-                "fewer valid SID paths than the requested beam size"
+                "fewer finite SID paths than the requested beam size"
             )
 
         beam_scores, candidate_indices = torch.topk(

@@ -1,8 +1,7 @@
-"""SID-constrained ranking structures and inference metrics."""
+"""Native SID generation validity checks and ranking metrics."""
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
@@ -13,8 +12,8 @@ import torch
 EVALUATION_TOP_K = 10
 
 
-class SidPrefixIndex:
-    """Store valid next codes for every observed SID prefix."""
+class SidValidityIndex:
+    """Store valid complete SID paths for vectorized membership checks."""
 
     def __init__(
         self,
@@ -25,9 +24,7 @@ class SidPrefixIndex:
         if not self.codebook_sizes:
             raise ValueError("codebook_sizes must not be empty")
 
-        allowed_sets = [
-            defaultdict(set) for _ in range(len(self.codebook_sizes))
-        ]
+        valid_complete_ids = set()
         n_codes = 0
         for row in codes:
             normalized = tuple(int(code) for code in row)
@@ -36,63 +33,33 @@ class SidPrefixIndex:
                     f"SID has {len(normalized)} levels; expected "
                     f"{len(self.codebook_sizes)}"
                 )
-            for level, (code, size) in enumerate(
-                zip(normalized, self.codebook_sizes)
-            ):
+            complete_id = 0
+            for level, (code, size) in enumerate(zip(
+                normalized,
+                self.codebook_sizes,
+            )):
                 if not 0 <= code < size:
                     raise ValueError(
                         f"level {level} code {code} outside [0, {size})"
                     )
-                allowed_sets[level][normalized[:level]].add(code)
+                complete_id = complete_id * size + code
+            valid_complete_ids.add(complete_id)
             n_codes += 1
         if n_codes == 0:
-            raise ValueError("cannot build a prefix index from empty SID codes")
+            raise ValueError("cannot build a validity index from empty SID codes")
 
-        self.allowed_next = tuple(
-            {
-                prefix: tuple(sorted(values))
-                for prefix, values in level.items()
-            }
-            for level in allowed_sets
-        )
-        final_level = len(self.codebook_sizes) - 1
-        final_size = self.codebook_sizes[-1]
-
-        def iter_complete_ids():
-            for prefix, allowed in self.allowed_next[final_level].items():
-                prefix_id = 0
-                for code, size in zip(
-                    prefix,
-                    self.codebook_sizes[:final_level],
-                ):
-                    prefix_id = prefix_id * size + code
-                base = prefix_id * final_size
-                for code in allowed:
-                    yield base + code
-
-        n_complete_ids = sum(
-            len(allowed)
-            for allowed in self.allowed_next[final_level].values()
-        )
         self._valid_complete_ids = np.fromiter(
-            iter_complete_ids(),
+            valid_complete_ids,
             dtype=np.int64,
-            count=n_complete_ids,
+            count=len(valid_complete_ids),
         )
         self._valid_complete_ids.sort()
-        self._allowed_mask_cache = {}
-
-    def allowed(self, prefix: Sequence[int]) -> tuple[int, ...]:
-        level = len(prefix)
-        if level >= len(self.codebook_sizes):
-            return ()
-        return self.allowed_next[level].get(tuple(prefix), ())
 
     def contains(self, codes: Sequence[int]) -> bool:
         normalized = tuple(int(code) for code in codes)
         if len(normalized) != len(self.codebook_sizes):
             return False
-        return normalized[-1] in self.allowed(normalized[:-1])
+        return bool(self.contains_many(np.asarray([normalized]))[0])
 
     def contains_many(self, codes) -> np.ndarray:
         """Vectorized membership test for complete raw SID codes."""
@@ -118,36 +85,6 @@ class SidPrefixIndex:
             & (self._valid_complete_ids[safe_positions] == encoded)
         )
 
-    def allowed_mask_tensors(
-        self,
-        device: torch.device | str,
-    ) -> tuple[torch.BoolTensor, ...]:
-        """Return dense next-code masks indexed by mixed-radix prefix IDs."""
-        resolved_device = torch.device(device)
-        cache_key = (resolved_device.type, resolved_device.index)
-        cached = self._allowed_mask_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        masks = []
-        prefix_space_size = 1
-        for level, codebook_size in enumerate(self.codebook_sizes):
-            mask = np.zeros(
-                (prefix_space_size, codebook_size),
-                dtype=np.bool_,
-            )
-            for prefix, allowed in self.allowed_next[level].items():
-                prefix_id = 0
-                for code, size in zip(prefix, self.codebook_sizes[:level]):
-                    prefix_id = prefix_id * size + code
-                mask[prefix_id, np.asarray(allowed, dtype=np.int64)] = True
-            masks.append(torch.from_numpy(mask).to(resolved_device))
-            prefix_space_size *= codebook_size
-
-        result = tuple(masks)
-        self._allowed_mask_cache[cache_key] = result
-        return result
-
 
 def _to_numpy(values) -> np.ndarray:
     if isinstance(values, torch.Tensor):
@@ -159,7 +96,7 @@ def _to_numpy(values) -> np.ndarray:
 class SidRankingMetrics:
     """Accumulate fixed Top-10 SID generation metrics."""
 
-    prefix_index: SidPrefixIndex
+    validity_index: SidValidityIndex
     n_samples: int = 0
     n_hits: int = 0
     reciprocal_rank_sum: float = 0.0
@@ -170,18 +107,18 @@ class SidRankingMetrics:
 
     def __post_init__(self) -> None:
         self.level_hits = np.zeros(
-            len(self.prefix_index.codebook_sizes),
+            len(self.validity_index.codebook_sizes),
             dtype=np.int64,
         )
         self.level_reciprocal_rank_sums = np.zeros(
-            len(self.prefix_index.codebook_sizes),
+            len(self.validity_index.codebook_sizes),
             dtype=np.float64,
         )
 
     def update(self, predictions, targets) -> None:
         predicted = _to_numpy(predictions)
         target = _to_numpy(targets)
-        n_levels = len(self.prefix_index.codebook_sizes)
+        n_levels = len(self.validity_index.codebook_sizes)
         if predicted.ndim != 3 or predicted.shape[2] != n_levels:
             raise ValueError(
                 f"predictions must have shape [N,K,{n_levels}]"
@@ -225,7 +162,7 @@ class SidRankingMetrics:
         self.n_predictions += int(
             top_predictions.shape[0] * EVALUATION_TOP_K
         )
-        valid_predictions = self.prefix_index.contains_many(
+        valid_predictions = self.validity_index.contains_many(
             top_predictions.reshape(-1, n_levels)
         )
         self.n_invalid += int((~valid_predictions).sum())

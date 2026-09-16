@@ -19,12 +19,12 @@ from ..data.kuairand import (
 )
 from ..data.schema import DEFAULT_GID_SEQUENCE_LENGTHS
 from ..model import KuaiRandLazyOneRecForCausalLM
-from ..model.inference import constrained_sid_beam_search
+from ..model.inference import sid_beam_search
 from ..sid.artifact import SemanticIDArtifact
 from ..sid.evaluation import (
     EVALUATION_TOP_K,
-    SidPrefixIndex,
     SidRankingMetrics,
+    SidValidityIndex,
 )
 from ..sid.token_codec import SidTokenCodec
 
@@ -159,12 +159,11 @@ def main() -> None:
     dataloader = DataLoader(dataset, **dataloader_kwargs)
 
     codec = SidTokenCodec(artifact.codebook_sizes)
-    prefix_index = SidPrefixIndex(
+    validity_index = SidValidityIndex(
         artifact.item_codes.values(),
         artifact.codebook_sizes,
     )
-    prefix_index.allowed_mask_tensors(device)
-    metrics = SidRankingMetrics(prefix_index)
+    metrics = SidRankingMetrics(validity_index)
     print(
         f"[evaluation] samples={len(dataset):,} batch_size={args.batch_size} "
         f"num_workers={args.num_workers} prefetch_factor={args.prefetch_factor} "
@@ -189,10 +188,9 @@ def main() -> None:
             else nullcontext()
         )
         with precision_context:
-            predictions, _ = constrained_sid_beam_search(
+            predictions, _ = sid_beam_search(
                 model=model,
                 context_inputs=context_inputs,
-                prefix_index=prefix_index,
                 beam_size=args.beam_size,
                 use_kv_cache=args.kv_cache,
             )

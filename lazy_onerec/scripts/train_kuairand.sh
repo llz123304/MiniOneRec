@@ -6,11 +6,11 @@ cd "${root}"
 
 # Edit this section to configure KuaiRand training.
 python_bin="${python_bin:-python3}"
-gpu_id=0  # Physical GPU index from nvidia-smi.
+gpu_id="${LAZY_GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-data_root="lazy_onerec/KuaiRand-1K"
-sid_artifact="lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json"
-output_dir="lazy_onerec/output/kuairand_model"
+data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
+sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
+output_dir="${LAZY_MODEL_OUTPUT_DIR:-lazy_onerec/output/kuairand_model}"
 
 # Dataset parameters.
 sample=-1  # -1 uses all training samples.

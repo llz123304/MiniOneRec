@@ -51,6 +51,46 @@ lazy_onerec/KuaiRand-1K/
 └── kuairand_video_categories.csv
 ```
 
+## Run the Full Pipeline
+
+Set these parameters at the top of `run_kuairand_pipeline.sh`:
+
+```bash
+embedding_model="Qwen/Qwen3-Embedding-0.6B"
+sid_method="rq-kmeans"
+sid_codebook_sizes=(512 512 512)
+sid_distance_metric="cosine"
+```
+
+Model, training, and inference settings remain in `train_kuairand.sh` and
+`evaluate_kuairand.sh`. Set `embedding_name` explicitly when two embedding
+paths share the same final directory name.
+
+Then run embedding, SID construction, training, and evaluation in order:
+
+```bash
+lazy_onerec/scripts/run_kuairand_pipeline.sh
+```
+
+Output directories preserve the embedding and SID lineage:
+
+```text
+lazy_onerec/output/
+├── embeddings/<embedding-model>/
+├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
+├── models/<embedding-model>/<sid-method-codebooks-distance>/
+└── evaluations/<embedding-model>/<sid-method-codebooks-distance>/
+```
+
+Complete artifacts are skipped automatically. Incomplete embedding output
+resumes from its saved progress. Each stage writes `pipeline_stage.json` with
+the selected model, SID configuration, and upstream directories. Preview the
+resolved paths and commands without running them:
+
+```bash
+PIPELINE_DRY_RUN=true lazy_onerec/scripts/run_kuairand_pipeline.sh
+```
+
 ## Build Item Embeddings
 
 Set these values in `embed_kuairand_items.sh`:
@@ -203,11 +243,13 @@ lazy_onerec/scripts/evaluate_kuairand.sh
 ```
 
 Evaluation defaults to BF16, batch size 64, eight DataLoader workers, cached
-Context K/V and Decoder Self-Attention K/V, and tensorized SID-prefix
-constraints. Reduce `batch_size` first if GPU memory is insufficient. Set
-`kv_cache=false` to disable caching for result comparisons.
+Context K/V and Decoder Self-Attention K/V. Reduce `batch_size` first if GPU
+memory is insufficient. Set `kv_cache=false` to disable caching for result
+comparisons.
 
-Evaluation uses SID-constrained Top-10 beam search. It reports only:
+Evaluation uses unconstrained Top-10 beam search over each complete codebook,
+then checks whether each generated complete path exists in the SID index. It
+reports only:
 
 ```text
 sid0_hr_at_10
@@ -222,8 +264,9 @@ invalid_sid_rate
 ```
 
 Per-level and overall metrics are all computed from the same ranked complete
-SID paths produced by constrained beam search. No teacher-forced evaluation or
-item-level metrics are used.
+SID paths produced by unconstrained beam search. `invalid_sid_rate` is the
+fraction of generated paths absent from the SID index. No teacher-forced
+evaluation or item-level metrics are used.
 
 ## Checks
 

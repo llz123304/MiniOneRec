@@ -1,4 +1,4 @@
-"""Tests for constrained SID generation metrics."""
+"""Tests for native SID generation metrics."""
 
 import unittest
 from types import SimpleNamespace
@@ -12,9 +12,9 @@ from lazy_onerec.data.schema import (
 )
 from lazy_onerec.data.user_features import CATEGORICAL_USER_FIELDS
 from lazy_onerec.model.configuration import LazyOneRecConfig
-from lazy_onerec.model.inference import constrained_sid_beam_search
+from lazy_onerec.model.inference import sid_beam_search
 from lazy_onerec.model.kuairand import KuaiRandLazyOneRecForCausalLM
-from lazy_onerec.sid.evaluation import SidPrefixIndex, SidRankingMetrics
+from lazy_onerec.sid.evaluation import SidRankingMetrics, SidValidityIndex
 from lazy_onerec.sid.layout import N_SPECIAL
 from lazy_onerec.sid.token_codec import SidTokenCodec
 
@@ -99,8 +99,8 @@ class SidEvaluationTest(unittest.TestCase):
             if tuple(row) != (9, 9, 9)
         ]
         valid_rows.extend(tuple(row) for row in targets)
-        prefix_index = SidPrefixIndex(valid_rows, (10, 10, 10))
-        metrics = SidRankingMetrics(prefix_index)
+        validity_index = SidValidityIndex(valid_rows, (10, 10, 10))
+        metrics = SidRankingMetrics(validity_index)
 
         metrics.update(predictions, targets)
 
@@ -119,25 +119,24 @@ class SidEvaluationTest(unittest.TestCase):
             },
         )
 
-    def test_constrained_beam_search_only_returns_valid_sids(self):
+    def test_unconstrained_beam_search_can_return_invalid_sids(self):
         codebook_sizes = (12, 12, 12)
         valid_codes = [(first, first % 2, 0) for first in range(12)]
-        prefix_index = SidPrefixIndex(valid_codes, codebook_sizes)
+        validity_index = SidValidityIndex(valid_codes, codebook_sizes)
         model = _FakeGenerationModel(codebook_sizes)
         context_inputs = {"dummy": torch.ones(2, 1)}
 
-        predictions, scores = constrained_sid_beam_search(
+        predictions, scores = sid_beam_search(
             model=model,
             context_inputs=context_inputs,
-            prefix_index=prefix_index,
             beam_size=10,
         )
 
         self.assertEqual(tuple(predictions.shape), (2, 10, 3))
         self.assertEqual(tuple(scores.shape), (2, 10))
         self.assertTrue(
-            all(
-                prefix_index.contains(row)
+            any(
+                not validity_index.contains(row)
                 for sample in predictions.tolist()
                 for row in sample
             )
@@ -145,26 +144,18 @@ class SidEvaluationTest(unittest.TestCase):
 
     def test_cached_beam_search_matches_uncached_search(self):
         codebook_sizes = (12, 12, 12)
-        valid_codes = [
-            (first, second, (first + second) % 12)
-            for first in range(12)
-            for second in range(2)
-        ]
-        prefix_index = SidPrefixIndex(valid_codes, codebook_sizes)
         context_inputs = {"dummy": torch.ones(2, 1)}
 
-        uncached_predictions, uncached_scores = constrained_sid_beam_search(
+        uncached_predictions, uncached_scores = sid_beam_search(
             model=_FakeGenerationModel(codebook_sizes),
             context_inputs=context_inputs,
-            prefix_index=prefix_index,
             beam_size=10,
             use_kv_cache=False,
         )
         cached_model = _FakeCachedGenerationModel(codebook_sizes)
-        cached_predictions, cached_scores = constrained_sid_beam_search(
+        cached_predictions, cached_scores = sid_beam_search(
             model=cached_model,
             context_inputs=context_inputs,
-            prefix_index=prefix_index,
             beam_size=10,
             use_kv_cache=True,
         )
@@ -243,24 +234,15 @@ class SidEvaluationTest(unittest.TestCase):
             4,
             dtype=torch.long,
         )
-        valid_codes = [
-            (first, second, (first + second) % 12)
-            for first in range(12)
-            for second in range(2)
-        ]
-        prefix_index = SidPrefixIndex(valid_codes, codebook_sizes)
-
-        uncached_predictions, uncached_scores = constrained_sid_beam_search(
+        uncached_predictions, uncached_scores = sid_beam_search(
             model=model,
             context_inputs=context_inputs,
-            prefix_index=prefix_index,
             beam_size=10,
             use_kv_cache=False,
         )
-        cached_predictions, cached_scores = constrained_sid_beam_search(
+        cached_predictions, cached_scores = sid_beam_search(
             model=model,
             context_inputs=context_inputs,
-            prefix_index=prefix_index,
             beam_size=10,
             use_kv_cache=True,
         )

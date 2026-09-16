@@ -50,6 +50,45 @@ lazy_onerec/KuaiRand-1K/
 └── kuairand_video_categories.csv
 ```
 
+## 一键执行
+
+在 `run_kuairand_pipeline.sh` 顶部设置以下参数：
+
+```bash
+embedding_model="Qwen/Qwen3-Embedding-0.6B"
+sid_method="rq-kmeans"
+sid_codebook_sizes=(512 512 512)
+sid_distance_metric="cosine"
+```
+
+模型结构、训练和推理参数仍分别使用 `train_kuairand.sh` 与
+`evaluate_kuairand.sh` 中的配置。若两个 Embedding 路径具有相同目录名，
+可显式设置 `embedding_name` 区分。
+
+然后依次执行 Embedding、SID、训练和评估：
+
+```bash
+lazy_onerec/scripts/run_kuairand_pipeline.sh
+```
+
+输出目录按 Embedding 模型和 SID 配置关联：
+
+```text
+lazy_onerec/output/
+├── embeddings/<embedding-model>/
+├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
+├── models/<embedding-model>/<sid-method-codebooks-distance>/
+└── evaluations/<embedding-model>/<sid-method-codebooks-distance>/
+```
+
+相同目录中的完整产物会自动跳过；Embedding 未完成时继续断点编码。
+每个阶段写入 `pipeline_stage.json`，记录使用的模型、SID 配置和上下游
+目录。只检查目录与命令而不执行：
+
+```bash
+PIPELINE_DRY_RUN=true lazy_onerec/scripts/run_kuairand_pipeline.sh
+```
+
 ## 生成 Item Embedding
 
 在 `embed_kuairand_items.sh` 中设置：
@@ -193,11 +232,11 @@ lazy_onerec/scripts/evaluate_kuairand.sh
 ```
 
 评估默认使用 BF16、batch size 64、8 个 DataLoader workers，并缓存
-Context K/V 和 Decoder Self-Attention K/V。SID 前缀约束使用批量张量
-计算。显存不足时优先减小 `batch_size`；可设置 `kv_cache=false` 关闭
-缓存进行结果核对。
+Context K/V 和 Decoder Self-Attention K/V。显存不足时优先减小
+`batch_size`；可设置 `kv_cache=false` 关闭缓存进行结果核对。
 
-评估使用 SID 约束 Top-10 Beam Search，仅输出：
+评估使用无约束 Top-10 Beam Search，从每层完整码本中生成原生 SID，
+然后检查完整路径是否存在于 SID 索引。仅输出：
 
 ```text
 sid0_hr_at_10
@@ -211,8 +250,9 @@ overall_mrr_at_10
 invalid_sid_rate
 ```
 
-分层与总体指标均从同一组约束 Beam Search 完整 SID 排名中统计，不使用
-teacher forcing，也不计算 item 粒度指标。
+分层与总体指标均从同一组无约束 Beam Search 完整 SID 排名中统计；
+`invalid_sid_rate` 表示生成路径不在 SID 索引中的比例。不使用 teacher
+forcing，也不计算 item 粒度指标。
 
 ## 检查
 
