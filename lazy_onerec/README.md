@@ -61,6 +61,7 @@ sid_method="rq-kmeans"
 sid_codebook_sizes=(512 512 512)
 sid_distance_metric="cosine"
 positive_target="all"  # all | click | long-view
+num_train_epochs=1
 ```
 
 Model, training, and inference settings remain in `train_kuairand.sh` and
@@ -79,13 +80,15 @@ Output directories preserve the embedding and SID lineage:
 lazy_onerec/output/
 ├── embeddings/<embedding-model>/
 ├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
-├── models/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
-└── evaluations/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
+├── models/<embedding-model>/<sid-config>[/target-<mode>]/epochs-N/
+└── evaluations/<embedding-model>/<sid-config>[/target-<mode>]/epochs-N/
 ```
 
-Complete artifacts are skipped automatically. Incomplete embedding output
-resumes from its saved progress. `all` keeps the original path; `click` and
-`long-view` use a `target-<mode>` subdirectory. Each stage writes
+Complete artifacts are skipped only when their stage manifest matches the
+current pipeline configuration. Incomplete embedding output resumes from its
+saved progress. `all` adds no target-mode subdirectory;
+`click` and `long-view` use a `target-<mode>` subdirectory. Every run uses an
+`epochs-N` subdirectory, including `epochs-1`. Each stage writes
 `pipeline_stage.json` with
 the selected model, SID configuration, and upstream directories. Preview the
 resolved paths and commands without running them:
@@ -115,7 +118,7 @@ lazy_onerec/scripts/embed_kuairand_items.sh
 Output:
 
 ```text
-lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/
+lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b/
 ├── item_ids.npy
 ├── item_embeddings.npy
 ├── embedding_config.json
@@ -188,6 +191,11 @@ All modes exclude `is_hate=1`. Random-exposure logs are not used. Other
 standard exposures remain in the chronological timeline for request gaps and
 history boundaries but are not generation targets.
 
+`num_train_epochs` controls the number of passes and defaults to `1`. One epoch
+visits training dates once in chronological order. Additional epochs restart
+from the earliest training date, so they are intended for convergence
+experiments rather than strict online single-pass training.
+
 History strictly uses events with `time_ms < target_time` and forms six
 independent sequences: click GID 128, long-view GID 128, long-view duration
 128, like GID 64, deep-interaction GID 32, and hate GID 16, for 496 behavior
@@ -240,7 +248,7 @@ lazy_onerec/scripts/train_kuairand.sh
 Default model output:
 
 ```text
-lazy_onerec/output/kuairand_model/
+lazy_onerec/output/kuairand_model/epochs-1/
 ```
 
 ## Evaluate

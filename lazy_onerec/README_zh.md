@@ -60,6 +60,7 @@ sid_method="rq-kmeans"
 sid_codebook_sizes=(512 512 512)
 sid_distance_metric="cosine"
 positive_target="all"  # all | click | long-view
+num_train_epochs=1
 ```
 
 模型结构、训练和推理参数仍分别使用 `train_kuairand.sh` 与
@@ -78,12 +79,15 @@ lazy_onerec/scripts/run_kuairand_pipeline.sh
 lazy_onerec/output/
 ├── embeddings/<embedding-model>/
 ├── kuairand_sid/<embedding-model>/<sid-method-codebooks-distance>/
-├── models/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
-└── evaluations/<embedding-model>/<sid-method-codebooks-distance>[/target-<mode>]/
+├── models/<embedding-model>/<sid-config>[/target-<mode>]/epochs-N/
+└── evaluations/<embedding-model>/<sid-config>[/target-<mode>]/epochs-N/
 ```
 
-相同目录中的完整产物会自动跳过；Embedding 未完成时继续断点编码。
-`all` 保持原目录，`click` 和 `long-view` 使用 `target-<mode>` 子目录。
+只有完整产物的阶段 manifest 与当前流水线配置一致时才会自动跳过；
+Embedding 未完成时继续断点编码。`all` 不增加目标类型子目录，
+`click` 和 `long-view` 使用
+`target-<mode>` 子目录。
+所有训练轮数都使用 `epochs-N` 子目录，包括 `epochs-1`。
 每个阶段写入 `pipeline_stage.json`，记录使用的模型、SID 配置和上下游
 目录。只检查目录与命令而不执行：
 
@@ -112,7 +116,7 @@ lazy_onerec/scripts/embed_kuairand_items.sh
 输出：
 
 ```text
-lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b-catalog-raw/
+lazy_onerec/output/embeddings/qwen-qwen3-embedding-0-6b/
 ├── item_ids.npy
 ├── item_embeddings.npy
 ├── embedding_config.json
@@ -182,6 +186,10 @@ long-view 仅 long_view=1
 三种模式都排除 `is_hate=1`。随机曝光日志不参与训练，其他标准曝光仍
 保留在时间线中用于计算请求间隔和历史边界，但不作为生成目标。
 
+`num_train_epochs` 控制训练轮数，默认值为 `1`。一轮训练严格按日期
+从早到晚遍历一次；多轮训练会再次从最早训练日开始，因此只建议用于
+收敛性实验，不再属于严格在线单遍训练。
+
 历史严格使用 `time_ms < target_time` 的行为，并独立构建 6 条序列：
 click GID 128、long-view GID 128、long-view duration 128、like GID
 64、deep-interaction GID 32 和 hate GID 16，共 496 个行为位置。
@@ -228,7 +236,7 @@ lazy_onerec/scripts/train_kuairand.sh
 模型默认保存到：
 
 ```text
-lazy_onerec/output/kuairand_model/
+lazy_onerec/output/kuairand_model/epochs-1/
 ```
 
 ## 评估

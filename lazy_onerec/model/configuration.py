@@ -14,6 +14,13 @@ So computation concentrates on target decoding rather than re-encoding context.
 
 from transformers import PretrainedConfig
 
+from ..data.schema import (
+    DEFAULT_GID_SEQUENCE_LENGTHS,
+    DEFAULT_QFORMER_QUERY_COUNTS,
+    POSITIVE_TARGET_MODES,
+    validate_gid_sequence_lengths,
+    validate_qformer_query_counts,
+)
 from ..sid.layout import BOS_ID, EOS_ID, N_SPECIAL, PAD_ID
 
 
@@ -30,7 +37,7 @@ class LazyOneRecConfig(PretrainedConfig):
         n_kv_heads: int = 2,              # GQA: key/value head groups (< n_heads)
         n_context_layers: int = 2,        # depth of the (lazy) context encoder; 0 = pure projection
         d_ff: int = 1024,
-        max_target_len: int = 4,          # BOS + 3-level codebook SID
+        max_target_len: int = None,       # derived as BOS + one token per SID level
         max_context_len: int = 3000,      # OneRec-V2 scales context up to ~3000
         use_per_token_qkv: bool = True,
         use_per_token_ffn: bool = True,
@@ -48,6 +55,19 @@ class LazyOneRecConfig(PretrainedConfig):
         # Per-level SID input/output weights are tied manually in the model.
         # Keep HF's global tying disabled because there is no single LM head.
         tie_word_embeddings: bool = False,
+        # --- KuaiRand context adapter ---
+        num_gid_embeddings: int = None,
+        user_categorical_cardinalities: list = None,
+        gid_dim: int = 64,
+        user_id_dim: int = 128,
+        categorical_dim: int = 8,
+        continuous_dim: int = 16,
+        duration_dim: int = 8,
+        history_lengths: dict = None,
+        qformer_query_counts: dict = None,
+        qformer_layers: int = 1,
+        positive_target: str = "all",
+        num_train_epochs: int = 1,
         **kwargs,
     ):
         self.codebook_sizes = (
@@ -74,6 +94,59 @@ class LazyOneRecConfig(PretrainedConfig):
                 f"vocab_size={vocab_size} does not match SID layout "
                 f"{expected_vocab_size}"
             )
+        expected_target_len = len(self.codebook_sizes) + 1
+        if max_target_len is None:
+            max_target_len = expected_target_len
+        elif int(max_target_len) != expected_target_len:
+            raise ValueError(
+                f"max_target_len={max_target_len} does not match "
+                f"{len(self.codebook_sizes)} SID levels"
+            )
+        feature_dims = (
+            gid_dim,
+            user_id_dim,
+            categorical_dim,
+            continuous_dim,
+            duration_dim,
+        )
+        if any(int(value) <= 0 for value in feature_dims):
+            raise ValueError("all feature embedding dimensions must be positive")
+        if num_gid_embeddings is not None and int(num_gid_embeddings) <= 0:
+            raise ValueError("num_gid_embeddings must be positive")
+        if user_categorical_cardinalities is not None and (
+            not user_categorical_cardinalities
+            or any(
+                int(value) <= 0
+                for value in user_categorical_cardinalities
+            )
+        ):
+            raise ValueError(
+                "user_categorical_cardinalities must contain positive integers"
+            )
+        resolved_history_lengths = {
+            name: int(value)
+            for name, value in (
+                DEFAULT_GID_SEQUENCE_LENGTHS
+                if history_lengths is None
+                else history_lengths
+            ).items()
+        }
+        validate_gid_sequence_lengths(resolved_history_lengths)
+        resolved_qformer_query_counts = {
+            name: int(value)
+            for name, value in (
+                DEFAULT_QFORMER_QUERY_COUNTS
+                if qformer_query_counts is None
+                else qformer_query_counts
+            ).items()
+        }
+        validate_qformer_query_counts(resolved_qformer_query_counts)
+        if int(qformer_layers) <= 0:
+            raise ValueError("qformer_layers must be positive")
+        if positive_target not in POSITIVE_TARGET_MODES:
+            raise ValueError(f"unsupported positive_target={positive_target!r}")
+        if int(num_train_epochs) <= 0:
+            raise ValueError("num_train_epochs must be positive")
         self.vocab_size = expected_vocab_size
         self.d_model = d_model
         self.n_layers = n_layers
@@ -93,6 +166,28 @@ class LazyOneRecConfig(PretrainedConfig):
         self.rms_norm_eps = rms_norm_eps
         self.rope_theta = rope_theta
         self.position_encoding = position_encoding
+        self.num_gid_embeddings = (
+            None
+            if num_gid_embeddings is None
+            else int(num_gid_embeddings)
+        )
+        self.user_categorical_cardinalities = (
+            None
+            if user_categorical_cardinalities is None
+            else [
+                int(value) for value in user_categorical_cardinalities
+            ]
+        )
+        self.gid_dim = int(gid_dim)
+        self.user_id_dim = int(user_id_dim)
+        self.categorical_dim = int(categorical_dim)
+        self.continuous_dim = int(continuous_dim)
+        self.duration_dim = int(duration_dim)
+        self.history_lengths = resolved_history_lengths
+        self.qformer_query_counts = resolved_qformer_query_counts
+        self.qformer_layers = int(qformer_layers)
+        self.positive_target = positive_target
+        self.num_train_epochs = int(num_train_epochs)
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,

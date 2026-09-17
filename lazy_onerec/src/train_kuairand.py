@@ -232,6 +232,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--micro-batch-size", type=int, default=256)
+    parser.add_argument("--num-train-epochs", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--prefetch-factor", type=int, default=4)
     parser.add_argument("--optimizer", default="adamw_torch_fused")
@@ -244,8 +245,118 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def build_context_layout(
+    args: argparse.Namespace,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Build and validate behavior-history and Q-Former sequence layouts."""
+    history_lengths = {
+        "click": args.click_history_length,
+        "long_view": args.long_view_history_length,
+        "like": args.like_history_length,
+        "deep_interact": args.deep_interact_history_length,
+        "hate": args.hate_history_length,
+    }
+    qformer_query_counts = {
+        "click": args.click_query_tokens,
+        "long_view": args.long_view_query_tokens,
+        "long_view_duration": args.long_view_duration_query_tokens,
+        "like": args.like_query_tokens,
+        "deep_interact": args.deep_interact_query_tokens,
+        "hate": args.hate_query_tokens,
+    }
+    total_context_length(history_lengths, qformer_query_counts)
+    return history_lengths, qformer_query_counts
+
+
+def build_model(
+    args: argparse.Namespace,
+    artifact: SemanticIDArtifact,
+    corpus: KuaiRandExposureCorpus,
+    history_lengths: dict[str, int],
+    qformer_query_counts: dict[str, int],
+) -> KuaiRandLazyOneRecForCausalLM:
+    """Build a KuaiRand model whose full constructor state lives in config."""
+    config = LazyOneRecConfig.from_codebook_sizes(
+        artifact.codebook_sizes,
+        d_model=args.d_model,
+        d_ff=args.d_ff,
+        n_layers=args.n_layers,
+        n_context_layers=args.n_context_layers,
+        n_heads=args.n_heads,
+        n_kv_heads=args.n_kv_heads,
+        use_per_token_qkv=args.per_token_qkv,
+        use_per_token_ffn=args.per_token_ffn,
+        kv_sharing=args.kv_sharing,
+        kv_share_every=args.kv_share_every,
+        max_context_len=total_context_length(
+            history_lengths,
+            qformer_query_counts,
+        ),
+        position_encoding=args.position_encoding,
+        num_gid_embeddings=corpus.num_gid_embeddings,
+        user_categorical_cardinalities=(
+            corpus.user_features.categorical_cardinalities
+        ),
+        gid_dim=args.gid_dim,
+        user_id_dim=args.user_id_dim,
+        categorical_dim=args.categorical_dim,
+        continuous_dim=args.continuous_dim,
+        duration_dim=args.duration_dim,
+        history_lengths=history_lengths,
+        qformer_query_counts=qformer_query_counts,
+        qformer_layers=args.qformer_layers,
+        positive_target=args.positive_target,
+        num_train_epochs=args.num_train_epochs,
+    )
+    return KuaiRandLazyOneRecForCausalLM(config)
+
+
+def build_training_arguments(args: argparse.Namespace) -> TrainingArguments:
+    """Build validated Hugging Face training arguments from CLI values."""
+    if args.num_train_epochs <= 0:
+        raise ValueError("num_train_epochs must be positive")
+    if (
+        args.micro_batch_size <= 0
+        or args.batch_size < args.micro_batch_size
+        or args.batch_size % args.micro_batch_size
+    ):
+        raise ValueError(
+            "batch_size must be a positive multiple of micro_batch_size"
+        )
+    if args.num_workers < 0:
+        raise ValueError("num_workers must be non-negative")
+    if args.prefetch_factor <= 0:
+        raise ValueError("prefetch_factor must be positive")
+    accumulation = args.batch_size // args.micro_batch_size
+    return TrainingArguments(
+        output_dir=args.output_dir,
+        per_device_train_batch_size=args.micro_batch_size,
+        per_device_eval_batch_size=args.micro_batch_size,
+        gradient_accumulation_steps=accumulation,
+        num_train_epochs=args.num_train_epochs,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_steps,
+        optim=args.optimizer,
+        logging_steps=args.logging_steps,
+        bf16=args.bf16,
+        save_strategy="epoch",
+        eval_strategy="no",
+        report_to=[],
+        remove_unused_columns=False,
+        dataloader_num_workers=args.num_workers,
+        dataloader_persistent_workers=args.num_workers > 0,
+        dataloader_prefetch_factor=(
+            args.prefetch_factor if args.num_workers > 0 else None
+        ),
+        accelerator_config={"even_batches": False},
+    )
+
+
 def main() -> None:
     args = parse_args()
+    history_lengths, qformer_query_counts = build_context_layout(args)
+    training_args = build_training_arguments(args)
     set_seed(args.seed)
     run_started = time.perf_counter()
     print(
@@ -255,7 +366,8 @@ def main() -> None:
     print(
         f"[config] sample={args.sample} min_history={args.min_history} "
         f"positive_target={args.positive_target} "
-        f"seed={args.seed} position_encoding={args.position_encoding}"
+        f"epochs={args.num_train_epochs} seed={args.seed} "
+        f"position_encoding={args.position_encoding}"
     )
     print(
         f"[runtime] torch={torch.__version__} "
@@ -284,21 +396,6 @@ def main() -> None:
         f"[stage] build_exposure_corpus elapsed="
         f"{time.perf_counter() - stage_started:.2f}s"
     )
-    history_lengths = {
-        "click": args.click_history_length,
-        "long_view": args.long_view_history_length,
-        "like": args.like_history_length,
-        "deep_interact": args.deep_interact_history_length,
-        "hate": args.hate_history_length,
-    }
-    qformer_query_counts = {
-        "click": args.click_query_tokens,
-        "long_view": args.long_view_query_tokens,
-        "long_view_duration": args.long_view_duration_query_tokens,
-        "like": args.like_query_tokens,
-        "deep_interact": args.deep_interact_query_tokens,
-        "hate": args.hate_query_tokens,
-    }
     stage_started = time.perf_counter()
     sample_indices = build_exposure_sample_indices(
         corpus=corpus,
@@ -375,39 +472,12 @@ def main() -> None:
     )
 
     stage_started = time.perf_counter()
-    config = LazyOneRecConfig.from_codebook_sizes(
-        artifact.codebook_sizes,
-        d_model=args.d_model,
-        d_ff=args.d_ff,
-        n_layers=args.n_layers,
-        n_context_layers=args.n_context_layers,
-        n_heads=args.n_heads,
-        n_kv_heads=args.n_kv_heads,
-        use_per_token_qkv=args.per_token_qkv,
-        use_per_token_ffn=args.per_token_ffn,
-        kv_sharing=args.kv_sharing,
-        kv_share_every=args.kv_share_every,
-        max_context_len=total_context_length(
-            history_lengths,
-            qformer_query_counts,
-        ),
-        position_encoding=args.position_encoding,
-    )
-    config.positive_target = args.positive_target
-    model = KuaiRandLazyOneRecForCausalLM(
-        config,
-        num_gid_embeddings=corpus.num_gid_embeddings,
-        user_categorical_cardinalities=(
-            corpus.user_features.categorical_cardinalities
-        ),
-        gid_dim=args.gid_dim,
-        user_id_dim=args.user_id_dim,
-        categorical_dim=args.categorical_dim,
-        continuous_dim=args.continuous_dim,
-        duration_dim=args.duration_dim,
-        history_lengths=history_lengths,
-        qformer_query_counts=qformer_query_counts,
-        qformer_layers=args.qformer_layers,
+    model = build_model(
+        args,
+        artifact,
+        corpus,
+        history_lengths,
+        qformer_query_counts,
     )
     print(
         f"[stage] initialize_model elapsed="
@@ -438,30 +508,23 @@ def main() -> None:
         f"fp32_weights={n_params * 4 / 2**30:.2f}GiB"
     )
 
-    if (
-        args.micro_batch_size <= 0
-        or args.batch_size < args.micro_batch_size
-        or args.batch_size % args.micro_batch_size
-    ):
-        raise ValueError(
-            "batch_size must be a positive multiple of micro_batch_size"
-        )
-    if args.num_workers < 0:
-        raise ValueError("num_workers must be non-negative")
-    if args.prefetch_factor <= 0:
-        raise ValueError("prefetch_factor must be positive")
-    accumulation = args.batch_size // args.micro_batch_size
+    accumulation = training_args.gradient_accumulation_steps
     batch_preview = DayBatchSampler(
         sample_dates=train_dataset.sample_dates,
         batch_size=args.micro_batch_size,
         seed=args.seed,
     )
-    optimizer_steps = math.ceil(len(batch_preview) / accumulation)
+    optimizer_steps_per_epoch = math.ceil(
+        len(batch_preview) / accumulation
+    )
+    optimizer_steps = optimizer_steps_per_epoch * args.num_train_epochs
     print(
         f"[optimization] micro_batch={args.micro_batch_size} "
         f"gradient_accumulation={accumulation} "
         f"effective_batch={args.batch_size} "
         f"micro_batches={len(batch_preview):,} "
+        f"epochs={args.num_train_epochs} "
+        f"optimizer_steps_per_epoch={optimizer_steps_per_epoch:,} "
         f"optimizer_steps={optimizer_steps:,}"
     )
     print(
@@ -469,29 +532,6 @@ def main() -> None:
         f"weight_decay={args.weight_decay} warmup_steps={args.warmup_steps} "
         f"optimizer={args.optimizer} logging_steps={args.logging_steps} "
         f"bf16={args.bf16}"
-    )
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        per_device_train_batch_size=args.micro_batch_size,
-        per_device_eval_batch_size=args.micro_batch_size,
-        gradient_accumulation_steps=accumulation,
-        num_train_epochs=1,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        warmup_steps=args.warmup_steps,
-        optim=args.optimizer,
-        logging_steps=args.logging_steps,
-        bf16=args.bf16,
-        save_strategy="epoch",
-        eval_strategy="no",
-        report_to=[],
-        remove_unused_columns=False,
-        dataloader_num_workers=args.num_workers,
-        dataloader_persistent_workers=args.num_workers > 0,
-        dataloader_prefetch_factor=(
-            args.prefetch_factor if args.num_workers > 0 else None
-        ),
-        accelerator_config={"even_batches": False},
     )
     print(
         f"[runtime] trainer_device={training_args.device} "

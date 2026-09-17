@@ -79,6 +79,33 @@ class DayOrderedTrainerTest(unittest.TestCase):
         self.assertEqual(trainer.state.global_step, 2)
         self.assertEqual(model.denominators, [4, 4, 4, 4, 2, 2])
 
+    def test_multiple_epochs_repeat_all_samples(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            arguments = TrainingArguments(
+                output_dir=output_dir,
+                per_device_train_batch_size=2,
+                gradient_accumulation_steps=2,
+                num_train_epochs=2,
+                learning_rate=1e-3,
+                save_strategy="no",
+                report_to=[],
+                disable_tqdm=True,
+                remove_unused_columns=False,
+            )
+            model = _CountingModel()
+            trainer = DayOrderedTrainer(
+                model=model,
+                args=arguments,
+                train_dataset=_ToyDataset(),
+                data_collator=_collate,
+            )
+
+            trainer.train()
+
+        self.assertEqual(sorted(model.seen), sorted(list(range(6)) * 2))
+        self.assertEqual(trainer.state.global_step, 4)
+        self.assertEqual(model.denominators, [4, 4, 2, 4, 4, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

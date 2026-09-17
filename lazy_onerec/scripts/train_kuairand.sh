@@ -6,14 +6,26 @@ cd "${root}"
 
 # Edit this section to configure KuaiRand training.
 python_bin="${python_bin:-python3}"
-gpu_id="${LAZY_GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
+gpu_id="${GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
-sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
-positive_target="${LAZY_POSITIVE_TARGET:-all}"  # all | click | long-view
+data_root="${DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
+
+# Upstream SID artifact. These defaults match build_sid.sh.
+sid_method="${SID_METHOD:-rq-kmeans}"
+read -r -a sid_codebook_sizes <<< "${SID_CODEBOOK_SIZES:-512 512 512}"
+sid_distance_metric="${SID_DISTANCE_METRIC:-cosine}"
+codebook_tag="$(IFS=-; printf '%s' "${sid_codebook_sizes[*]}")"
+default_sid_dir="lazy_onerec/output/kuairand_sid"
+default_sid_dir+="/${sid_method}-${codebook_tag}-${sid_distance_metric}"
+sid_dir="${SID_DIR:-${default_sid_dir}}"
+sid_artifact="${SID_ARTIFACT:-${sid_dir}/sid_index.json}"
+
+positive_target="${POSITIVE_TARGET:-all}"  # all | click | long-view
+num_train_epochs="${NUM_TRAIN_EPOCHS:-1}"
 default_output_dir="lazy_onerec/output/kuairand_model"
-[[ "${positive_target}" != "all" ]] && default_output_dir+="-${positive_target}"
-output_dir="${LAZY_MODEL_OUTPUT_DIR:-${default_output_dir}}"
+[[ "${positive_target}" != "all" ]] && default_output_dir+="/target-${positive_target}"
+default_output_dir+="/epochs-${num_train_epochs}"
+output_dir="${MODEL_OUTPUT_DIR:-${default_output_dir}}"
 
 # Dataset parameters.
 sample=-1  # -1 uses all training samples.
@@ -51,7 +63,7 @@ kv_sharing=true
 kv_share_every=2
 position_encoding="rope"  # rope | learned
 
-# Optimization parameters. Training is a single chronological pass.
+# Optimization parameters. epoch=1 is the strict chronological single pass.
 batch_size=256
 micro_batch_size=256
 num_workers=8
@@ -100,6 +112,7 @@ args=(
   --position-encoding "${position_encoding}"
   --batch-size "${batch_size}"
   --micro-batch-size "${micro_batch_size}"
+  --num-train-epochs "${num_train_epochs}"
   --num-workers "${num_workers}"
   --prefetch-factor "${prefetch_factor}"
   --optimizer "${optimizer}"

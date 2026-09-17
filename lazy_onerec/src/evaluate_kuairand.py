@@ -91,6 +91,28 @@ def decode_target_codes(
     return target_codes
 
 
+def validate_checkpoint_dataset(
+    model: KuaiRandLazyOneRecForCausalLM,
+    corpus: KuaiRandExposureCorpus,
+) -> None:
+    """Fail before evaluation if dataset IDs cannot use checkpoint embeddings."""
+    gid_capacity = (
+        model.context_feature_embedding.gid_embedding.num_embeddings
+    )
+    if corpus.num_gid_embeddings > gid_capacity:
+        raise ValueError(
+            f"dataset requires {corpus.num_gid_embeddings} GID embeddings, "
+            f"but checkpoint provides {gid_capacity}"
+        )
+    expected_cardinalities = tuple(
+        model.config.user_categorical_cardinalities
+    )
+    if corpus.user_features.categorical_cardinalities != expected_cardinalities:
+        raise ValueError(
+            "checkpoint and dataset user feature cardinalities differ"
+        )
+
+
 def main() -> None:
     args = parse_args()
     if args.beam_size < EVALUATION_TOP_K:
@@ -125,20 +147,14 @@ def main() -> None:
             f"{checkpoint_positive_target!r} differs from evaluation "
             f"positive_target={args.positive_target!r}"
         )
-    model.to(device)
-    model.eval()
 
     corpus = KuaiRandExposureCorpus(
         args.data_root,
         positive_target=args.positive_target,
     )
-    expected_cardinalities = tuple(
-        model.config.user_categorical_cardinalities
-    )
-    if corpus.user_features.categorical_cardinalities != expected_cardinalities:
-        raise ValueError(
-            "checkpoint and dataset user feature cardinalities differ"
-        )
+    validate_checkpoint_dataset(model, corpus)
+    model.to(device)
+    model.eval()
     history_lengths = dict(
         getattr(
             model.config,

@@ -6,15 +6,27 @@ cd "${root}"
 
 # Edit this section to configure SID generation evaluation.
 python_bin="${python_bin:-python3}"
-gpu_id="${LAZY_GPU_ID:-0}"
+gpu_id="${GPU_ID:-0}"
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
-sid_artifact="${LAZY_SID_ARTIFACT:-lazy_onerec/output/kuairand_sid/rq-kmeans-512-512-512-cosine/sid_index.json}"
-positive_target="${LAZY_POSITIVE_TARGET:-all}"  # all | click | long-view
+data_root="${DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
+
+# SID artifact used to decode targets. These defaults match build_sid.sh.
+sid_method="${SID_METHOD:-rq-kmeans}"
+read -r -a sid_codebook_sizes <<< "${SID_CODEBOOK_SIZES:-512 512 512}"
+sid_distance_metric="${SID_DISTANCE_METRIC:-cosine}"
+codebook_tag="$(IFS=-; printf '%s' "${sid_codebook_sizes[*]}")"
+default_sid_dir="lazy_onerec/output/kuairand_sid"
+default_sid_dir+="/${sid_method}-${codebook_tag}-${sid_distance_metric}"
+sid_dir="${SID_DIR:-${default_sid_dir}}"
+sid_artifact="${SID_ARTIFACT:-${sid_dir}/sid_index.json}"
+
+positive_target="${POSITIVE_TARGET:-all}"  # all | click | long-view
+num_train_epochs="${NUM_TRAIN_EPOCHS:-1}"
 default_checkpoint="lazy_onerec/output/kuairand_model"
-[[ "${positive_target}" != "all" ]] && default_checkpoint+="-${positive_target}"
-checkpoint="${LAZY_MODEL_CHECKPOINT:-${default_checkpoint}}"
-output="${LAZY_EVALUATION_OUTPUT:-${checkpoint}/test_sid_metrics.json}"
+[[ "${positive_target}" != "all" ]] && default_checkpoint+="/target-${positive_target}"
+default_checkpoint+="/epochs-${num_train_epochs}"
+checkpoint="${MODEL_CHECKPOINT:-${default_checkpoint}}"
+output="${EVALUATION_OUTPUT:-${checkpoint}/test_sid_metrics.json}"
 
 sample=-1
 batch_size=64

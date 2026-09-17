@@ -431,98 +431,39 @@ class KuaiRandLazyOneRecForCausalLM(LazyOneRecForCausalLM):
         "request_categorical_features",
     )
 
-    def __init__(
-        self,
-        config: LazyOneRecConfig,
-        num_gid_embeddings: Optional[int] = None,
-        user_categorical_cardinalities: Optional[tuple[int, ...]] = None,
-        gid_dim: Optional[int] = None,
-        user_id_dim: Optional[int] = None,
-        categorical_dim: Optional[int] = None,
-        continuous_dim: Optional[int] = None,
-        duration_dim: Optional[int] = None,
-        history_lengths: Optional[dict[str, int]] = None,
-        qformer_query_counts: Optional[dict[str, int]] = None,
-        qformer_layers: Optional[int] = None,
-    ):
-        num_gid_embeddings = int(
-            num_gid_embeddings
-            if num_gid_embeddings is not None
-            else getattr(config, "num_gid_embeddings")
-        )
-        gid_dim = int(
-            gid_dim if gid_dim is not None else getattr(config, "gid_dim", 64)
-        )
-        user_id_dim = int(
-            user_id_dim
-            if user_id_dim is not None
-            else getattr(config, "user_id_dim", 128)
-        )
-        categorical_dim = int(
-            categorical_dim
-            if categorical_dim is not None
-            else getattr(config, "categorical_dim", 8)
-        )
-        continuous_dim = int(
-            continuous_dim
-            if continuous_dim is not None
-            else getattr(config, "continuous_dim", 16)
-        )
-        duration_dim = int(
-            duration_dim
-            if duration_dim is not None
-            else getattr(config, "duration_dim", 8)
-        )
-        if history_lengths is None:
-            history_lengths = getattr(
-                config,
-                "history_lengths",
-                DEFAULT_GID_SEQUENCE_LENGTHS,
-            )
+    def __init__(self, config: LazyOneRecConfig):
+        num_gid_embeddings = getattr(config, "num_gid_embeddings", None)
+        if num_gid_embeddings is None:
+            raise ValueError("config.num_gid_embeddings is required")
+        num_gid_embeddings = int(num_gid_embeddings)
+        gid_dim = int(getattr(config, "gid_dim", 64))
+        user_id_dim = int(getattr(config, "user_id_dim", 128))
+        categorical_dim = int(getattr(config, "categorical_dim", 8))
+        continuous_dim = int(getattr(config, "continuous_dim", 16))
+        duration_dim = int(getattr(config, "duration_dim", 8))
         history_lengths = {
-            name: int(history_lengths[name])
+            name: int(config.history_lengths[name])
             for name in DEFAULT_GID_SEQUENCE_LENGTHS
         }
         validate_gid_sequence_lengths(history_lengths)
-        if qformer_query_counts is None:
-            qformer_query_counts = getattr(
-                config,
-                "qformer_query_counts",
-                DEFAULT_QFORMER_QUERY_COUNTS,
-            )
         qformer_query_counts = {
-            name: int(qformer_query_counts[name])
+            name: int(config.qformer_query_counts[name])
             for name in CONTEXT_SEQUENCE_NAMES
         }
         validate_qformer_query_counts(qformer_query_counts)
-        qformer_layers = int(
-            qformer_layers
-            if qformer_layers is not None
-            else getattr(config, "qformer_layers", 1)
+        qformer_layers = int(getattr(config, "qformer_layers", 1))
+        user_categorical_cardinalities = getattr(
+            config,
+            "user_categorical_cardinalities",
+            None,
         )
         if user_categorical_cardinalities is None:
-            user_categorical_cardinalities = getattr(
-                config,
-                "user_categorical_cardinalities",
-                None,
+            raise ValueError(
+                "config.user_categorical_cardinalities is required"
             )
-        if user_categorical_cardinalities is None:
-            raise ValueError("user categorical cardinalities are required")
         user_categorical_cardinalities = tuple(
             int(value) for value in user_categorical_cardinalities
         )
-        config.num_gid_embeddings = num_gid_embeddings
-        config.gid_dim = gid_dim
-        config.user_categorical_cardinalities = list(
-            user_categorical_cardinalities
-        )
-        config.user_id_dim = user_id_dim
-        config.categorical_dim = categorical_dim
-        config.continuous_dim = continuous_dim
-        config.duration_dim = duration_dim
-        config.history_lengths = history_lengths
-        config.qformer_query_counts = qformer_query_counts
-        config.qformer_layers = qformer_layers
         super().__init__(config)
         self.context_feature_embedding = KuaiRandContextEmbedding(
             num_gid_embeddings=num_gid_embeddings,

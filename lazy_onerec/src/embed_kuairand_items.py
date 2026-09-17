@@ -43,6 +43,21 @@ class ModelProfile:
     supports_mrl: bool = False
 
 
+@dataclass(frozen=True)
+class EmbeddingOutputPaths:
+    directory: Path
+    embeddings: Path
+    item_ids: Path
+    config: Path
+    progress: Path
+
+
+@dataclass
+class EncodingState:
+    embeddings: np.memmap
+    start: int
+
+
 MODEL_PROFILES = (
     (
         "qwen3-embedding",
@@ -216,54 +231,39 @@ def count_lines(path: Path) -> int:
         return sum(1 for _ in source)
 
 
-def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
-    data_dir = Path(args.data_root) / "data"
-    catalog_path = find_one(data_dir, "video_features_basic_*.csv")
-    captions_path = Path(args.captions)
-    categories_path = Path(args.categories)
-    work_dir = Path(
-        args.work_dir
-        or "lazy_onerec/output/kuairand_items/catalog"
-    )
-    work_dir.mkdir(parents=True, exist_ok=True)
-    ids_path = work_dir / "item_ids.npy"
-    texts_path = work_dir / "item_texts.jsonl"
-    manifest_path = work_dir / "text_manifest.json"
-
-    expected_sources = {
-        "catalog": source_signature(catalog_path),
-        "captions": source_signature(captions_path),
-        "categories": source_signature(categories_path),
-    }
+def validate_text_cache(
+    ids_path: Path,
+    texts_path: Path,
+    manifest_path: Path,
+    expected_sources: Dict[str, object],
+    limit: Optional[int],
+) -> int:
+    """Validate an existing text cache and return its row count."""
+    with manifest_path.open(encoding="utf-8") as source:
+        manifest = json.load(source)
+    ids = np.load(ids_path, mmap_mode="r", allow_pickle=False)
     if (
-        ids_path.exists()
-        and texts_path.exists()
-        and manifest_path.exists()
-        and not args.rebuild_texts
+        manifest.get("scope") != "catalog"
+        or manifest.get("limit") != limit
+        or manifest.get("sources") != expected_sources
+        or int(manifest.get("num_items", -1)) != len(ids)
+        or count_lines(texts_path) != len(ids)
     ):
-        with manifest_path.open(encoding="utf-8") as source:
-            manifest = json.load(source)
-        ids = np.load(ids_path, mmap_mode="r", allow_pickle=False)
-        if (
-            manifest.get("scope") != "catalog"
-            or manifest.get("limit") != args.limit
-            or manifest.get("sources") != expected_sources
-            or int(manifest.get("num_items", -1)) != len(ids)
-            or count_lines(texts_path) != len(ids)
-        ):
-            raise ValueError(
-                "existing text cache does not match current inputs; "
-                "pass --rebuild-texts"
-            )
-        print(f"reuse text cache: items={len(ids)} path={work_dir}")
-        return ids_path, texts_path
+        raise ValueError(
+            "existing text cache does not match current inputs; "
+            "pass --rebuild-texts"
+        )
+    return len(ids)
 
-    ids = catalog_video_ids(catalog_path)
-    if args.limit is not None:
-        ids = ids[: args.limit]
-    if len(ids) == 0:
-        raise ValueError("selected item catalog is empty")
 
+def write_text_cache(
+    ids: np.ndarray,
+    catalog_path: Path,
+    captions_path: Path,
+    categories_path: Path,
+    texts_path: Path,
+) -> Dict[str, int]:
+    """Write aligned item text rows and return source-coverage counts."""
     temporary_texts = texts_path.with_suffix(".jsonl.tmp")
     stats = {
         "caption": 0,
@@ -314,9 +314,59 @@ def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
                 )
                 + "\n"
             )
-
-    np.save(ids_path, ids.astype(np.int32, copy=False))
     os.replace(temporary_texts, texts_path)
+    return stats
+
+
+def prepare_text_cache(args: argparse.Namespace) -> Tuple[Path, Path]:
+    data_dir = Path(args.data_root) / "data"
+    catalog_path = find_one(data_dir, "video_features_basic_*.csv")
+    captions_path = Path(args.captions)
+    categories_path = Path(args.categories)
+    work_dir = Path(
+        args.work_dir
+        or "lazy_onerec/output/kuairand_items/catalog"
+    )
+    work_dir.mkdir(parents=True, exist_ok=True)
+    ids_path = work_dir / "item_ids.npy"
+    texts_path = work_dir / "item_texts.jsonl"
+    manifest_path = work_dir / "text_manifest.json"
+
+    expected_sources = {
+        "catalog": source_signature(catalog_path),
+        "captions": source_signature(captions_path),
+        "categories": source_signature(categories_path),
+    }
+    if (
+        ids_path.exists()
+        and texts_path.exists()
+        and manifest_path.exists()
+        and not args.rebuild_texts
+    ):
+        num_items = validate_text_cache(
+            ids_path,
+            texts_path,
+            manifest_path,
+            expected_sources,
+            args.limit,
+        )
+        print(f"reuse text cache: items={num_items} path={work_dir}")
+        return ids_path, texts_path
+
+    ids = catalog_video_ids(catalog_path)
+    if args.limit is not None:
+        ids = ids[: args.limit]
+    if len(ids) == 0:
+        raise ValueError("selected item catalog is empty")
+
+    stats = write_text_cache(
+        ids,
+        catalog_path,
+        captions_path,
+        categories_path,
+        texts_path,
+    )
+    np.save(ids_path, ids.astype(np.int32, copy=False))
     atomic_json(
         manifest_path,
         {
@@ -384,6 +434,120 @@ def resolve_torch_dtype(name: str, device: str, torch: object) -> object:
     }[name]
 
 
+def build_embedding_output_paths(args: argparse.Namespace) -> EmbeddingOutputPaths:
+    directory = Path(
+        args.output_dir
+        or f"lazy_onerec/output/embeddings/{model_slug(args.model_name)}"
+    )
+    return EmbeddingOutputPaths(
+        directory=directory,
+        embeddings=directory / "item_embeddings.npy",
+        item_ids=directory / "item_ids.npy",
+        config=directory / "embedding_config.json",
+        progress=directory / "progress.json",
+    )
+
+
+def prepare_encoding_output(
+    args: argparse.Namespace,
+    paths: EmbeddingOutputPaths,
+    item_ids: np.ndarray,
+    output_dim: int,
+    config: Dict[str, object],
+) -> EncodingState:
+    """Create a new memmap or validate and reopen a resumable output."""
+    paths.directory.mkdir(parents=True, exist_ok=True)
+    output_files = (
+        paths.embeddings,
+        paths.item_ids,
+        paths.config,
+        paths.progress,
+    )
+    if args.overwrite:
+        for path in output_files:
+            path.unlink(missing_ok=True)
+
+    if any(path.exists() for path in output_files):
+        if not all(path.exists() for path in output_files):
+            raise ValueError(
+                f"incomplete output under {paths.directory}; use --overwrite"
+            )
+        with paths.config.open(encoding="utf-8") as source:
+            existing_config = json.load(source)
+        existing_config.pop("completed", None)
+        if existing_config != config:
+            raise ValueError(
+                f"embedding config changed under {paths.directory}; "
+                "use a new --output-dir or --overwrite"
+            )
+        with paths.progress.open(encoding="utf-8") as source:
+            progress = json.load(source)
+        start = int(progress["next_index"])
+        if (
+            int(progress.get("num_items", -1)) != len(item_ids)
+            or not 0 <= start <= len(item_ids)
+        ):
+            raise ValueError(f"invalid resume position: {start}")
+        output_ids = np.load(
+            paths.item_ids,
+            mmap_mode="r",
+            allow_pickle=False,
+        )
+        if not np.array_equal(item_ids, output_ids):
+            raise ValueError("output item_ids.npy differs from text cache")
+        embeddings = np.load(
+            paths.embeddings,
+            mmap_mode="r+",
+            allow_pickle=False,
+        )
+        expected_shape = (len(item_ids), output_dim)
+        if (
+            embeddings.shape != expected_shape
+            or embeddings.dtype != np.dtype(args.storage_dtype)
+        ):
+            raise ValueError(
+                f"unexpected embedding array {embeddings.shape} "
+                f"{embeddings.dtype}; use --overwrite"
+            )
+        print(f"resume encoding at item {start}/{len(item_ids)}")
+        return EncodingState(embeddings=embeddings, start=start)
+
+    embeddings = np.lib.format.open_memmap(
+        paths.embeddings,
+        mode="w+",
+        dtype=np.dtype(args.storage_dtype),
+        shape=(len(item_ids), output_dim),
+    )
+    np.save(paths.item_ids, np.asarray(item_ids, dtype=np.int32))
+    atomic_json(paths.config, config)
+    atomic_json(
+        paths.progress,
+        {"next_index": 0, "num_items": len(item_ids)},
+    )
+    return EncodingState(embeddings=embeddings, start=0)
+
+
+def persist_embedding_batch(
+    embeddings: np.memmap,
+    progress_path: Path,
+    batch_start: int,
+    values: np.ndarray,
+    storage_dtype: str,
+) -> int:
+    """Persist values before atomically advancing the resumable cursor."""
+    batch_end = batch_start + len(values)
+    embeddings[batch_start:batch_end] = values.astype(
+        storage_dtype,
+        copy=False,
+    )
+    embeddings.flush()
+    atomic_json(
+        progress_path,
+        {"next_index": batch_end, "num_items": len(embeddings)},
+    )
+    return batch_end
+
+
 def encode_items(
     args: argparse.Namespace, ids_path: Path, texts_path: Path
 ) -> None:
@@ -399,20 +563,7 @@ def encode_items(
         ) from error
 
     profile = resolve_profile(args.model_name)
-    normalization_suffix = "" if args.normalize else "-raw"
-    output_dir = Path(
-        args.output_dir
-        or (
-            f"lazy_onerec/output/embeddings/"
-            f"{model_slug(args.model_name)}-catalog"
-            f"{normalization_suffix}"
-        )
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    embeddings_path = output_dir / "item_embeddings.npy"
-    output_ids_path = output_dir / "item_ids.npy"
-    config_path = output_dir / "embedding_config.json"
-    progress_path = output_dir / "progress.json"
+    paths = build_embedding_output_paths(args)
 
     item_ids = np.load(ids_path, mmap_mode="r", allow_pickle=False)
     device = resolve_device(args.device, torch)
@@ -454,79 +605,17 @@ def encode_items(
         "item_ids_source": str(ids_path.resolve()),
         "item_texts_source": str(texts_path.resolve()),
     }
-
-    if args.overwrite:
-        for path in (
-            embeddings_path,
-            output_ids_path,
-            config_path,
-            progress_path,
-        ):
-            path.unlink(missing_ok=True)
-
-    start = 0
-    if (
-        embeddings_path.exists()
-        or output_ids_path.exists()
-        or config_path.exists()
-        or progress_path.exists()
-    ):
-        if not all(
-            path.exists()
-            for path in (
-                embeddings_path,
-                output_ids_path,
-                config_path,
-                progress_path,
-            )
-        ):
-            raise ValueError(
-                f"incomplete output under {output_dir}; use --overwrite"
-            )
-        with config_path.open(encoding="utf-8") as source:
-            existing_config = json.load(source)
-        existing_config.pop("completed", None)
-        if existing_config != config:
-            raise ValueError(
-                f"embedding config changed under {output_dir}; "
-                "use a new --output-dir or --overwrite"
-            )
-        with progress_path.open(encoding="utf-8") as source:
-            start = int(json.load(source)["next_index"])
-        if not 0 <= start <= len(item_ids):
-            raise ValueError(f"invalid resume position: {start}")
-        output_ids = np.load(
-            output_ids_path, mmap_mode="r", allow_pickle=False
-        )
-        if not np.array_equal(item_ids, output_ids):
-            raise ValueError("output item_ids.npy differs from text cache")
-        embeddings = np.load(
-            embeddings_path, mmap_mode="r+", allow_pickle=False
-        )
-        if embeddings.shape != (len(item_ids), output_dim):
-            raise ValueError(
-                f"unexpected embedding shape {embeddings.shape}; "
-                "use --overwrite"
-            )
-        print(f"resume encoding at item {start}/{len(item_ids)}")
-    else:
-        storage_dtype = np.dtype(args.storage_dtype)
-        embeddings = np.lib.format.open_memmap(
-            embeddings_path,
-            mode="w+",
-            dtype=storage_dtype,
-            shape=(len(item_ids), output_dim),
-        )
-        np.save(output_ids_path, np.asarray(item_ids, dtype=np.int32))
-        atomic_json(config_path, config)
-        atomic_json(
-            progress_path,
-            {"next_index": 0, "num_items": len(item_ids)},
-        )
+    state = prepare_encoding_output(
+        args,
+        paths,
+        item_ids,
+        output_dim,
+        config,
+    )
 
     with tqdm(
         total=len(item_ids),
-        initial=start,
+        initial=state.start,
         desc="Encoding items",
         unit="item",
         dynamic_ncols=True,
@@ -534,7 +623,7 @@ def encode_items(
         for batch_start, texts in iter_text_batches(
             texts_path,
             item_ids,
-            start,
+            state.start,
             args.write_batch_size,
             profile.document_prefix,
         ):
@@ -549,22 +638,20 @@ def encode_items(
             if args.normalize:
                 norms = np.linalg.norm(values, axis=1, keepdims=True)
                 values = values / np.maximum(norms, 1e-12)
-            batch_end = batch_start + len(values)
-            embeddings[batch_start:batch_end] = values.astype(
-                args.storage_dtype, copy=False
-            )
-            embeddings.flush()
-            atomic_json(
-                progress_path,
-                {"next_index": batch_end, "num_items": len(item_ids)},
+            persist_embedding_batch(
+                state.embeddings,
+                paths.progress,
+                batch_start,
+                values,
+                args.storage_dtype,
             )
             progress.update(len(values))
 
     config["completed"] = True
-    atomic_json(config_path, config)
+    atomic_json(paths.config, config)
     print(
-        f"embedding complete: shape={embeddings.shape} "
-        f"dtype={embeddings.dtype} path={embeddings_path}"
+        f"embedding complete: shape={state.embeddings.shape} "
+        f"dtype={state.embeddings.dtype} path={paths.embeddings}"
     )
 
 

@@ -17,6 +17,7 @@ from lazy_onerec.model.kuairand import KuaiRandLazyOneRecForCausalLM
 from lazy_onerec.sid.evaluation import SidRankingMetrics, SidValidityIndex
 from lazy_onerec.sid.layout import N_SPECIAL
 from lazy_onerec.sid.token_codec import SidTokenCodec
+from lazy_onerec.src.evaluate_kuairand import validate_checkpoint_dataset
 
 
 class _FakeGenerationModel:
@@ -81,6 +82,25 @@ class _FakeCachedGenerationModel(_FakeGenerationModel):
 
 
 class SidEvaluationTest(unittest.TestCase):
+    def test_dataset_gid_vocabulary_must_fit_checkpoint(self):
+        model = SimpleNamespace(
+            config=SimpleNamespace(
+                user_categorical_cardinalities=[4, 5],
+            ),
+            context_feature_embedding=SimpleNamespace(
+                gid_embedding=SimpleNamespace(num_embeddings=10),
+            ),
+        )
+        corpus = SimpleNamespace(
+            num_gid_embeddings=11,
+            user_features=SimpleNamespace(
+                categorical_cardinalities=(4, 5),
+            ),
+        )
+
+        with self.assertRaisesRegex(ValueError, "checkpoint provides 10"):
+            validate_checkpoint_dataset(model, corpus)
+
     def test_hr_mrr_level_accuracy_and_invalid_rate(self):
         targets = np.asarray([[1, 2, 3], [0, 1, 2]])
         predictions = np.zeros((2, 10, 3), dtype=np.int64)
@@ -192,16 +212,14 @@ class SidEvaluationTest(unittest.TestCase):
             n_heads=4,
             n_kv_heads=2,
             max_context_len=16,
-        )
-        model = KuaiRandLazyOneRecForCausalLM(
-            config,
             num_gid_embeddings=32,
             user_categorical_cardinalities=tuple(
                 4 for _ in CATEGORICAL_USER_FIELDS
             ),
             history_lengths=history_lengths,
             qformer_query_counts=qformer_query_counts,
-        ).eval()
+        )
+        model = KuaiRandLazyOneRecForCausalLM(config).eval()
         context_inputs = {}
         for name in GID_SEQUENCE_NAMES:
             gid_ids = torch.randint(

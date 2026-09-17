@@ -57,9 +57,6 @@ def main():
                 qformer_query_counts,
             ),
             position_encoding=pe,
-        )
-        model = KuaiRandLazyOneRecForCausalLM(
-            cfg,
             num_gid_embeddings=100,
             user_categorical_cardinalities=(
                 8,
@@ -68,6 +65,7 @@ def main():
             history_lengths=history_lengths,
             qformer_query_counts=qformer_query_counts,
         )
+        model = KuaiRandLazyOneRecForCausalLM(cfg)
         model.train()
         assert len(model.embed_tokens.level_emb) == 3
         assert cfg.use_per_token_qkv

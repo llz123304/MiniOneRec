@@ -6,12 +6,12 @@ cd "${root}"
 
 # Edit this section to configure item embedding.
 python_bin="${python_bin:-python3}"
-gpu_id="${LAZY_GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
+gpu_id="${GPU_ID:-0}"  # Physical GPU index from nvidia-smi.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
 
 # Recommended default: strong Chinese/multilingual quality, 1024-d native
 # embeddings, and Matryoshka truncation support (for example output_dim=512).
-model_name="${LAZY_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}"
+model_name="${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}"
 
 # Other supported choices (uncomment exactly one and comment the default):
 # model_name="BAAI/bge-m3"                         # Multilingual, 1024 dimensions.
@@ -23,12 +23,12 @@ model_name="${LAZY_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-0.6B}"
 # A local Hugging Face model directory is also accepted:
 # model_name="/data/sdb2/llz/hf_models/Qwen3-Embedding-0.6B"
 
-revision="${LAZY_EMBEDDING_REVISION:-}"
-data_root="${LAZY_DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
-captions="${LAZY_CAPTIONS:-${data_root}/kuairand_video_captions.csv}"
-categories="${LAZY_CATEGORIES:-${data_root}/kuairand_video_categories.csv}"
-work_dir="${LAZY_EMBEDDING_WORK_DIR:-}"
-output_dir="${LAZY_EMBEDDING_OUTPUT_DIR:-}"  # Empty selects the default path.
+revision="${EMBEDDING_REVISION:-}"
+data_root="${DATA_ROOT:-lazy_onerec/KuaiRand-1K}"
+captions="${CAPTIONS:-${data_root}/kuairand_video_captions.csv}"
+categories="${CATEGORIES:-${data_root}/kuairand_video_categories.csv}"
+work_dir="${EMBEDDING_WORK_DIR:-}"
+output_dir="${EMBEDDING_OUTPUT_DIR:-}"  # Empty selects the default path.
 
 batch_size=512
 write_batch_size=8192
