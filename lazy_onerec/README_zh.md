@@ -140,14 +140,21 @@ codebook_sizes=(512 512 512)
 distance_metric="cosine"  # euclidean | cosine
 ```
 
-`method` 支持 `rq-kmeans`、`constrained-rq-kmeans`、`rq-vae` 和
-`rq-kmeans-plus`。
+`method` 支持 `rq-kmeans`、`balanced-kmeans`、
+`constrained-rq-kmeans`、`rq-vae` 和 `rq-kmeans-plus`。
 
 `rq-kmeans` 支持每层使用不同的 2 的幂码本，例如 `256-512-1024`
 对应 `nbits=[8,9,10]`。余弦模式会归一化输入，并在神经量化器中使用
 余弦距离。
 当 embedding 已经 L2 归一化时，FAISS `rq-kmeans` 的欧氏与余弦结果
 可能相同；距离对比优先使用 constrained 或神经方法。
+
+`balanced-kmeans` 实现 OneRec 的贪心均衡算法。每轮按中心顺序从尚未
+分配的 item 中选择最近的固定配额，因此每簇大小为
+`floor(N/K)` 或 `ceil(N/K)`。距离、Top-K、中心和 residual 更新默认
+使用 CUDA；`balanced_distance_mode=auto` 会在显存足够时缓存
+`N x K` 距离矩阵，否则自动使用分块流式 Top-K。该方法保证容量均衡，
+但不保证最小费用流意义下的全局最优分配。
 
 执行：
 

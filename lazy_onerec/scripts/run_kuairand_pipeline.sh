@@ -74,7 +74,7 @@ validate_config() {
     exit 2
   fi
   case "${sid_method}" in
-    rq-kmeans|constrained-rq-kmeans|rq-vae|rq-kmeans-plus) ;;
+    rq-kmeans|balanced-kmeans|constrained-rq-kmeans|rq-vae|rq-kmeans-plus) ;;
     *)
       echo "unsupported sid_method=${sid_method}" >&2
       exit 2

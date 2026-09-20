@@ -142,8 +142,8 @@ codebook_sizes=(512 512 512)
 distance_metric="cosine"  # euclidean | cosine
 ```
 
-`method` supports `rq-kmeans`, `constrained-rq-kmeans`, `rq-vae`, and
-`rq-kmeans-plus`.
+`method` supports `rq-kmeans`, `balanced-kmeans`,
+`constrained-rq-kmeans`, `rq-vae`, and `rq-kmeans-plus`.
 
 `rq-kmeans` supports a different power-of-two codebook at each level; for
 example, `256-512-1024` uses `nbits=[8,9,10]`. Cosine mode normalizes inputs
@@ -151,6 +151,15 @@ and uses cosine assignment in neural quantizers.
 With pre-normalized embeddings, FAISS `rq-kmeans` may produce identical
 Euclidean and cosine results; use constrained or neural methods for that
 distance comparison.
+
+`balanced-kmeans` implements OneRec's greedy balanced assignment. For each
+centroid, it selects a fixed quota from the currently unassigned items, so
+cluster sizes are either `floor(N/K)` or `ceil(N/K)`. Distance, Top-K,
+centroid, and residual updates use CUDA by default.
+`balanced_distance_mode=auto` keeps the `N x K` distance matrix on the GPU
+when memory permits and otherwise falls back to chunked streaming Top-K.
+The method guarantees balanced capacities but not the globally optimal
+min-cost-flow assignment.
 
 Run:
 

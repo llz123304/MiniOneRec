@@ -1,4 +1,4 @@
-"""Unified CLI for all four MiniOneRec SID construction methods."""
+"""Unified CLI for all supported MiniOneRec SID construction methods."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 
 from .builders import (
     build_constrained_rq_kmeans,
+    build_onerec_balanced_kmeans,
     build_rq_kmeans,
     build_rq_kmeans_plus,
     build_rq_vae,
@@ -15,6 +16,7 @@ from .distance import DISTANCE_METRICS
 
 METHODS = (
     "rq-kmeans",
+    "balanced-kmeans",
     "constrained-rq-kmeans",
     "rq-vae",
     "rq-kmeans-plus",
@@ -40,6 +42,12 @@ def parse_args() -> argparse.Namespace:
     # K-means backends
     parser.add_argument("--max-iter", type=int, default=100)
     parser.add_argument("--beam-size", type=int, default=1)
+    parser.add_argument(
+        "--distance-mode",
+        choices=("auto", "matrix", "streaming"),
+        default="auto",
+    )
+    parser.add_argument("--distance-batch-size", type=int, default=65536)
 
     # Neural backends
     parser.add_argument("--latent-dim", type=int, default=32)
@@ -85,6 +93,15 @@ def main() -> None:
             **common,
             max_iter=args.max_iter,
             seed=args.seed,
+        )
+    elif args.method == "balanced-kmeans":
+        artifact = build_onerec_balanced_kmeans(
+            **common,
+            max_iter=args.max_iter,
+            seed=args.seed,
+            device=args.device,
+            distance_mode=args.distance_mode,
+            distance_batch_size=args.distance_batch_size,
         )
     else:
         if len(args.sinkhorn_epsilons) != len(args.codebook_sizes):

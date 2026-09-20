@@ -22,6 +22,9 @@ from .neural_rq import (
     make_rq_kmeans_plus,
     train_neural_rq,
 )
+from .onerec_balanced_kmeans import (
+    residual_kmeans as onerec_balanced_residual_kmeans,
+)
 
 
 def load_embeddings(path: str) -> np.ndarray:
@@ -182,6 +185,61 @@ def build_constrained_rq_kmeans(
             "reconstruction_mse": float(
                 np.mean((embeddings - reconstruction) ** 2)
             ),
+        },
+        require_unique,
+    )
+
+
+def build_onerec_balanced_kmeans(
+    embeddings_path: str,
+    output_dir: str,
+    codebook_sizes: Sequence[int],
+    item_ids_path: str | None = None,
+    max_iter: int = 20,
+    seed: int = 42,
+    distance_metric: str = "euclidean",
+    device: str = "cuda",
+    distance_mode: str = "auto",
+    distance_batch_size: int = 65536,
+    require_unique: bool = False,
+) -> SemanticIDArtifact:
+    distance_metric = validate_distance_metric(distance_metric)
+    embeddings = prepare_numpy_values(
+        load_embeddings(embeddings_path),
+        distance_metric,
+        copy=False,
+    )
+    item_ids = load_item_ids(item_ids_path, len(embeddings))
+    codes, codebooks, reconstruction_mse, level_stats = (
+        onerec_balanced_residual_kmeans(
+            embeddings,
+            codebook_sizes,
+            max_iter=max_iter,
+            seed=seed,
+            distance_metric=distance_metric,
+            device=device,
+            distance_mode=distance_mode,
+            distance_batch_size=distance_batch_size,
+        )
+    )
+    return _save_outputs(
+        output_dir,
+        item_ids,
+        codes,
+        codebook_sizes,
+        codebooks,
+        {
+            "method": "OneRec-Balanced-Kmeans",
+            "embeddings_path": embeddings_path,
+            "embedding_dim": int(embeddings.shape[1]),
+            "seed": seed,
+            "max_iter": max_iter,
+            "distance_metric": distance_metric,
+            "device": device,
+            "distance_mode": distance_mode,
+            "distance_batch_size": distance_batch_size,
+            "level_stats": level_stats,
+            "reconstruction_mse": reconstruction_mse,
         },
         require_unique,
     )

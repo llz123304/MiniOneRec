@@ -6,9 +6,10 @@ cd "${root}"
 
 # Edit this section to configure SID construction.
 python_bin="${python_bin:-python3}"
-gpu_id="${GPU_ID:-0}"  # Used by rq-vae and rq-kmeans-plus.
+gpu_id="${GPU_ID:-0}"  # Used by GPU-backed SID methods.
 export CUDA_VISIBLE_DEVICES="${gpu_id}"
-method="${SID_METHOD:-rq-kmeans}"  # rq-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
+# rq-kmeans | balanced-kmeans | constrained-rq-kmeans | rq-vae | rq-kmeans-plus
+method="${SID_METHOD:-rq-kmeans}"
 
 # This stage consumes existing embeddings; it does not load an embedding model.
 # EMBEDDING_MODEL selects the expected output of embed_kuairand_items.sh.
@@ -25,6 +26,7 @@ require_unique=false
 # SID experiment parameters.
 read -r -a codebook_sizes <<< "${SID_CODEBOOK_SIZES:-512 512 512}"
 distance_metric="${SID_DISTANCE_METRIC:-cosine}"  # euclidean | cosine
+device="cuda"  # balanced-kmeans | rq-vae | rq-kmeans-plus
 
 codebook_tag="$(IFS=-; echo "${codebook_sizes[*]}")"
 default_output_dir="lazy_onerec/output/kuairand_sid"
@@ -33,7 +35,10 @@ output_dir="${SID_OUTPUT_DIR:-${default_output_dir}}"
 
 # Method-specific K-means parameters.
 beam_size=1  # rq-kmeans
-max_iter=100  # constrained-rq-kmeans
+balanced_max_iter=20
+balanced_distance_mode="auto"  # auto | matrix | streaming
+balanced_distance_batch_size=65536
+constrained_max_iter=100
 
 # RQ-VAE and RQ-Kmeans+ parameters.
 latent_dim=32
@@ -42,7 +47,6 @@ epochs=500
 batch_size=2048
 learning_rate=""  # Empty uses the method default.
 weight_decay=0.0
-device="cuda"
 beta=0.25
 quant_loss_weight=1.0
 no_kmeans_init=false
@@ -65,8 +69,17 @@ case "${method}" in
   rq-kmeans)
     args+=(--beam-size "${beam_size}")
     ;;
+  balanced-kmeans)
+    args+=(
+      --max-iter "${balanced_max_iter}"
+      --device "${device}"
+      --distance-mode "${balanced_distance_mode}"
+      --distance-batch-size "${balanced_distance_batch_size}"
+      --seed "${seed}"
+    )
+    ;;
   constrained-rq-kmeans)
-    args+=(--max-iter "${max_iter}" --seed "${seed}")
+    args+=(--max-iter "${constrained_max_iter}" --seed "${seed}")
     ;;
   rq-vae|rq-kmeans-plus)
     args+=(
